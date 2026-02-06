@@ -47,6 +47,7 @@ class HTTPMessageEvent:
         self.event_id = event_id
         self.http_request_data = request_data
         self._raw_headers = request_data.headers
+        self.unified_msg_origin = session_id
 
         # 设置额外信息
         self._set_extra_info(request_data)
