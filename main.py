@@ -106,7 +106,7 @@ class HTTPAdapterPlugin(Star):
         # 导入 HTTP 适配器以注册它
         # 装饰器会自动注册适配器
         try:
-            from .adapter.http_adapter import HTTPAdapter
+            from .src.http_adapter import HTTPAdapter
             logger.info("[HTTPAdapter] HTTP 适配器导入成功")
         except ImportError as e:
             logger.error(f"[HTTPAdapter] 导入 HTTP 适配器失败: {e}")
@@ -114,7 +114,7 @@ class HTTPAdapterPlugin(Star):
 
         # 同时导入简单版本（可选）
         try:
-            from .adapter.simple_http_adapter import SimpleHTTPAdapter
+            from .src.simple_http_adapter import SimpleHTTPAdapter
             logger.info("[HTTPAdapter] 简单 HTTP 适配器导入成功")
         except ImportError:
             logger.warning("[HTTPAdapter] 简单 HTTP 适配器未找到，跳过导入")
