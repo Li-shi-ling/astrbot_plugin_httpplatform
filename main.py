@@ -1,24 +1,32 @@
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
+from .src import HttpPlatformAdapter, HttpMessageEvent
 
-@register("helloworld", "YourName", "一个简单的 Hello World 插件", "1.0.0")
-class MyPlugin(Star):
+@register("httpplatform", "AstrBot Team", "HTTP 适配器平台 - 支持 WebSocket 到 HTTP 的转换", "1.0.0")
+class HttpPlatformPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
+        logger.info("[HTTP Platform] Initializing HTTP Platform Plugin")
 
     async def initialize(self):
-        """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
+        """初始化 HTTP 平台插件"""
+        logger.info("[HTTP Platform] HTTP Platform Plugin initialized")
 
-    # 注册指令的装饰器。指令名为 helloworld。注册成功后，发送 `/helloworld` 就会触发这个指令，并回复 `你好, {user_name}!`
-    @filter.command("helloworld")
-    async def helloworld(self, event: AstrMessageEvent):
-        """这是一个 hello world 指令""" # 这是 handler 的描述，将会被解析方便用户了解插件内容。建议填写。
-        user_name = event.get_sender_name()
-        message_str = event.message_str # 用户发的纯文本消息字符串
-        message_chain = event.get_messages() # 用户所发的消息的消息链 # from astrbot.api.message_components import *
-        logger.info(message_chain)
-        yield event.plain_result(f"Hello, {user_name}, 你发了 {message_str}!") # 发送一条纯文本消息
+    @filter.command("httpstatus")
+    async def httpstatus(self, event: AstrMessageEvent):
+        """查看 HTTP 平台状态"""
+        # 这里可以添加获取平台状态的逻辑
+        yield event.plain_result("HTTP Platform is running")
 
     async def terminate(self):
-        """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
+        """销毁 HTTP 平台插件"""
+        logger.info("[HTTP Platform] HTTP Platform Plugin terminated")
+
+# 确保适配器被注册
+try:
+    # 导入适配器以确保它被注册
+    from .src.Platform import HttpPlatformAdapter
+    logger.info("[HTTP Platform] HTTP Platform Adapter imported and registered")
+except Exception as e:
+    logger.error(f"[HTTP Platform] Error importing adapter: {e}")
