@@ -47,10 +47,17 @@ class HTTPMessageEvent:
         self.event_id = event_id
         self.http_request_data = request_data
         self._raw_headers = request_data.headers
+        self._message_obj = message_obj
+
+        # 添加 unified_msg_origin 属性（就是 session_id）
         self.unified_msg_origin = session_id
 
         # 设置额外信息
         self._set_extra_info(request_data)
+
+        # 初始化状态属性
+        self._is_wake = True
+        self._is_at_or_wake_command = True
 
     def _set_extra_info(self, request_data: HTTPRequestData):
         """设置额外信息"""
@@ -66,10 +73,6 @@ class HTTPMessageEvent:
         self.set_extra("accept", request_data.accept)
         self.set_extra("request_timestamp", request_data.timestamp)
 
-        # 代理基类方法
-        self.is_wake = True
-        self.is_at_or_wake_command = True
-
     @property
     def adapter(self):
         """获取适配器实例"""
@@ -80,13 +83,69 @@ class HTTPMessageEvent:
         """获取原始请求头"""
         return self._raw_headers
 
+    # 添加缺失的方法
+    def get_sender_name(self) -> str:
+        """获取发送者名称"""
+        # 从 message_obj 的 sender 中获取昵称
+        if hasattr(self._message_obj, 'sender'):
+            sender = self._message_obj.sender
+            if hasattr(sender, 'nickname') and sender.nickname:
+                return sender.nickname
+            if hasattr(sender, 'user_id') and sender.user_id:
+                return str(sender.user_id)
+        # 如果 message_obj 没有 sender，从 extra 中获取
+        return self.get_extra("username", "HTTP用户")
+
+    # 代理基础事件的方法
+    def get_extra(self, key, default=None):
+        """获取额外信息"""
+        return self._base_event.get_extra(key, default)
+
     def set_extra(self, key, value):
         """设置额外信息"""
         return self._base_event.set_extra(key, value)
 
-    def get_extra(self, key, default=None):
-        """获取额外信息"""
-        return self._base_event.get_extra(key, default)
+    # 属性访问
+    @property
+    def is_wake(self):
+        """是否唤醒"""
+        return self._is_wake
+
+    @is_wake.setter
+    def is_wake(self, value):
+        """设置唤醒状态"""
+        self._is_wake = value
+
+    @property
+    def is_at_or_wake_command(self):
+        """是否at或唤醒命令"""
+        return self._is_at_or_wake_command
+
+    @is_at_or_wake_command.setter
+    def is_at_or_wake_command(self, value):
+        """设置at或唤醒命令状态"""
+        self._is_at_or_wake_command = value
+
+    # 消息相关属性
+    @property
+    def message_str(self):
+        """获取消息字符串"""
+        return self._base_event.message_str if hasattr(self._base_event, 'message_str') else ""
+
+    @property
+    def message_obj(self):
+        """获取消息对象"""
+        return self._message_obj
+
+    @property
+    def platform_meta(self):
+        """获取平台元数据"""
+        return self._base_event.platform_meta if hasattr(self._base_event, 'platform_meta') else None
+
+    @property
+    def session_id(self):
+        """获取会话ID"""
+        return self.unified_msg_origin
 
     async def send(self, message_chain: MessageChain):
         """发送响应"""
@@ -96,6 +155,13 @@ class HTTPMessageEvent:
         """流式发送响应"""
         await self.send(message_chain)
 
+    # 通用代理方法，处理其他可能需要的属性
+    def __getattr__(self, name):
+        """代理所有未定义的方法到 _base_event"""
+        # 如果请求的方法在 _base_event 中存在，则代理到 _base_event
+        if hasattr(self._base_event, name):
+            return getattr(self._base_event, name)
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
 
 class StandardHTTPMessageEvent(HTTPMessageEvent):
     """标准 HTTP 消息事件"""
