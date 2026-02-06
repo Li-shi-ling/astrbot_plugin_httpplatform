@@ -110,41 +110,92 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
                 pending.future.set_result(response_text)
 
 class StreamHTTPMessageEvent(HTTPMessageEvent):
-    """流式 HTTP 消息事件"""
+    """流式 HTTP 消息事件 - 修复版"""
 
     def __init__(self, message_str, message_obj, platform_meta, session_id, adapter, queue, event_id, request_data):
         super().__init__(message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data)
         self.queue = queue
+        self._message_buffer = []  # 新增：消息缓冲区
+        self._is_streaming = False  # 新增：是否正在流式传输
+        self._stream_complete = asyncio.Event()  # 新增：流式完成事件
         self.set_extra("event_type", HTTP_EVENT_TYPE["STREAMING"])
         self.set_extra("streaming", True)
 
     async def send(self, message_chain: MessageChain):
-        """发送完整响应"""
+        """发送完整响应 - 这是单条消息的结束"""
         response_text = str(message_chain)
+
+        # 如果正在流式传输，先发送流式结束
+        if self._is_streaming:
+            await self._end_streaming()
+
+        # 发送完整消息
         await self.queue.put({
             "type": HTTP_MESSAGE_TYPE["COMPLETE"],
-            "data": response_text
+            "data": {"message": response_text}
         })
-        await self.queue.put(None)  # 结束信号
+
+        # 注意：不发送 END，因为可能还有后续消息
+
+    async def _end_streaming(self):
+        """结束当前的流式传输"""
+        if self._is_streaming:
+            self._is_streaming = False
+            self._stream_complete.set()
 
     async def send_streaming(
-        self,
-        generator: AsyncGenerator[MessageChain, None],
-        use_fallback: bool = False,
+            self,
+            generator: AsyncGenerator[MessageChain, None],
+            use_fallback: bool = False,
     ):
         """发送流式消息到消息平台，使用异步生成器"""
+        if self._is_streaming:
+            # 如果已经在流式传输，先结束之前的
+            await self._end_streaming()
+
+        self._is_streaming = True
+        self._stream_complete.clear()
+
         try:
-            async for message_chain in generator:
-                response_text = str(message_chain)
-                await self.queue.put({
-                    "type": HTTP_MESSAGE_TYPE["STREAM"],
-                    "data": response_text
-                })
+            # 创建一个任务来消费生成器
+            async def consume_generator():
+                async for message_chain in generator:
+                    response_text = str(message_chain)
+                    await self.queue.put({
+                        "type": HTTP_MESSAGE_TYPE["STREAM"],
+                        "data": {"chunk": response_text}
+                    })
+
+            # 启动消费任务
+            consume_task = asyncio.create_task(consume_generator())
+
+            # 等待流式传输完成（被外部中断或生成器结束）
+            await self._stream_complete.wait()
+
+            # 取消消费任务
+            consume_task.cancel()
+            try:
+                await consume_task
+            except asyncio.CancelledError:
+                pass
+
         except Exception as e:
             logger.error(f"[StreamHTTPMessageEvent] 流式发送时出错: {e}")
-            # 发送结束信号
-            await self.queue.put(None)
-            raise
+            await self.queue.put({
+                "type": HTTP_MESSAGE_TYPE["ERROR"],
+                "data": {"error": str(e)}
+            })
+
+    def mark_conversation_end(self):
+        """标记整个对话结束（由外部调用）"""
+        # 结束任何正在进行的流式传输
+        asyncio.create_task(self._end_streaming())
+
+        # 发送最终结束事件
+        asyncio.create_task(self.queue.put({
+            "type": HTTP_MESSAGE_TYPE["END"],
+            "data": {}
+        }))
 
 class WebSocketMessageEvent(HTTPMessageEvent):
     """WebSocket 消息事件"""
@@ -614,7 +665,7 @@ class HTTPAdapter(Platform):
             return jsonify({"error": f"内部服务器错误: {str(e)}"}), HTTP_STATUS_CODE["INTERNAL_ERROR"]
 
     async def _handle_http_stream_message(self, request_obj) -> Any:
-        """处理 HTTP 流式消息请求"""
+        """处理 HTTP 流式消息请求 - 修复版，支持多条消息"""
         # 鉴权
         auth_result = await self._check_auth(request_obj)
         if auth_result is not None:
@@ -648,7 +699,7 @@ class HTTPAdapter(Platform):
             # 创建 SSE 响应生成器
             async def generate():
                 event_id = str(uuid.uuid4())
-                queue = asyncio.Queue()
+                queue = asyncio.Queue(maxsize=100)  # 增加队列大小
 
                 # 创建消息对象
                 abm = AstrBotMessage()
@@ -692,28 +743,82 @@ class HTTPAdapter(Platform):
                 # 生成 SSE 流
                 yield f"event: {HTTP_MESSAGE_TYPE['CONNECTED']}\ndata: {json.dumps({'event_id': event_id, 'session_id': session_id})}\n\n"
 
-                while True:
-                    try:
-                        timeout = data.get('timeout', 30)
-                        item = await asyncio.wait_for(queue.get(), timeout=timeout)
-                        if item is None:
-                            yield f"event: {HTTP_MESSAGE_TYPE['END']}\ndata: {{}}\n\n"
+                # 设置超时参数
+                timeout = data.get('timeout', 600)  # 增加到10分钟，支持长对话
+                start_time = time.time()
+                last_activity_time = time.time()
+                received_end_event = False
+
+                try:
+                    while not received_end_event:
+                        # 检查总超时
+                        current_time = time.time()
+                        if current_time - start_time > timeout:
+                            yield f"event: {HTTP_MESSAGE_TYPE['TIMEOUT']}\ndata: {{'reason': 'total_timeout', 'duration': current_time - start_time}}\n\n"
                             break
 
-                        yield f"event: {item['type']}\ndata: {json.dumps(item['data'] if isinstance(item['data'], dict) else {'message': item['data']})}\n\n"
-                    except asyncio.TimeoutError:
-                        yield f"event: {HTTP_MESSAGE_TYPE['TIMEOUT']}\ndata: {{}}\n\n"
-                        break
+                        # 检查活动超时（60秒无活动发送心跳）
+                        if current_time - last_activity_time > 60:
+                            # 发送心跳保持连接
+                            yield f": heartbeat {int(current_time)}\n\n"
+                            last_activity_time = current_time
+
+                        try:
+                            # 等待队列消息，使用短超时以便检查其他条件
+                            item = await asyncio.wait_for(queue.get(), timeout=1.0)
+
+                            if item is None:
+                                # None 是特殊的结束信号
+                                yield f"event: {HTTP_MESSAGE_TYPE['END']}\ndata: {{'reason': 'normal_end'}}\n\n"
+                                received_end_event = True
+                                break
+
+                            # 处理事件
+                            event_type = item.get('type')
+                            event_data = item.get('data', {})
+
+                            # 更新最后活动时间
+                            last_activity_time = time.time()
+
+                            # 发送事件
+                            yield f"event: {event_type}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+
+                            # 如果是 end 事件，结束循环
+                            if event_type == HTTP_MESSAGE_TYPE['END']:
+                                received_end_event = True
+                                break
+
+                        except asyncio.TimeoutError:
+                            # 超时是正常的，继续循环检查其他条件
+                            continue
+
+                except asyncio.CancelledError:
+                    # 连接被取消
+                    logger.info(f"[HTTPAdapter] SSE连接被取消: {event_id}")
+                    yield f"event: {HTTP_MESSAGE_TYPE['END']}\ndata: {{'reason': 'cancelled'}}\n\n"
+                except Exception as e:
+                    logger.error(f"[HTTPAdapter] 生成SSE时出错: {e}", exc_info=True)
+                    yield f"event: {HTTP_MESSAGE_TYPE['ERROR']}\ndata: {{'error': str(e), 'event_id': event_id}}\n\n"
+
+                finally:
+                    # 清理资源
+                    if event_id in self.pending_responses:
+                        self.pending_responses.pop(event_id, None)
+                    logger.info(f"[HTTPAdapter] SSE连接结束: {event_id}, 会话: {session_id}")
 
             headers = {
                 'Content-Type': 'text/event-stream',
                 'Cache-Control': 'no-cache',
                 'Connection': 'keep-alive',
                 'X-Accel-Buffering': 'no',  # 禁用Nginx缓冲
+                'X-Accel-Timeout': '1200',  # Nginx代理超时时间
             }
 
             return generate(), HTTP_STATUS_CODE["OK"], headers
 
+        except json.JSONDecodeError:
+            self.total_errors += 1
+            return jsonify({"error": "无效的 JSON 数据"}), HTTP_STATUS_CODE["BAD_REQUEST"]
         except Exception as e:
             self.total_errors += 1
             logger.error(f"[HTTPAdapter] 处理流式请求时出错: {e}", exc_info=True)
