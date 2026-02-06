@@ -33,6 +33,7 @@ from .dataclasses import HTTPRequestData, PendingResponse, SessionStats, Adapter
 
 
 # ==================== HTTP 消息事件类 ====================
+# ==================== HTTP 消息事件类 ====================
 class HTTPMessageEvent:
     """HTTP 消息事件基类"""
 
@@ -51,6 +52,9 @@ class HTTPMessageEvent:
 
         # 添加 unified_msg_origin 属性（就是 session_id）
         self.unified_msg_origin = session_id
+
+        # 存储原始消息字符串
+        self._message_str = message_str
 
         # 设置额外信息
         self._set_extra_info(request_data)
@@ -96,6 +100,23 @@ class HTTPMessageEvent:
         # 如果 message_obj 没有 sender，从 extra 中获取
         return self.get_extra("username", "HTTP用户")
 
+    # 消息字符串属性（带 getter 和 setter）
+    @property
+    def message_str(self):
+        """获取消息字符串"""
+        return self._message_str
+
+    @message_str.setter
+    def message_str(self, value):
+        """设置消息字符串"""
+        self._message_str = value
+        # 同时更新基类的 message_str
+        if hasattr(self._base_event, 'message_str'):
+            try:
+                self._base_event.message_str = value
+            except AttributeError:
+                pass  # 如果基类没有 setter，忽略
+
     # 代理基础事件的方法
     def get_extra(self, key, default=None):
         """获取额外信息"""
@@ -128,11 +149,6 @@ class HTTPMessageEvent:
 
     # 消息相关属性
     @property
-    def message_str(self):
-        """获取消息字符串"""
-        return self._base_event.message_str if hasattr(self._base_event, 'message_str') else ""
-
-    @property
     def message_obj(self):
         """获取消息对象"""
         return self._message_obj
@@ -155,10 +171,9 @@ class HTTPMessageEvent:
         """流式发送响应"""
         await self.send(message_chain)
 
-    # 通用代理方法，处理其他可能需要的属性
+    # 通用代理方法
     def __getattr__(self, name):
         """代理所有未定义的方法到 _base_event"""
-        # 如果请求的方法在 _base_event 中存在，则代理到 _base_event
         if hasattr(self._base_event, name):
             return getattr(self._base_event, name)
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
