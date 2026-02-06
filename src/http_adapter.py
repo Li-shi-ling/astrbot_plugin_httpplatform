@@ -149,41 +149,31 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             use_fallback: bool = False,
     ):
         """发送流式消息到消息平台，使用异步生成器"""
-        if self._is_streaming:
-            # 如果已经在流式传输，先结束之前的
-            await self._end_streaming()
-
-        self._is_streaming = True
-        self._stream_complete.clear()
-
         try:
-            # 创建一个任务来消费生成器
-            async def consume_generator():
-                async for message_chain in generator:
-                    response_text = str(message_chain)
-                    await self.queue.put({
-                        "type": HTTP_MESSAGE_TYPE["STREAM"],
-                        "data": {"chunk": response_text}
-                    })
+            # 直接消费生成器，不搞复杂的等待逻辑
+            async for message_chain in generator:
+                response_text = str(message_chain)
+                await self.queue.put({
+                    "type": HTTP_MESSAGE_TYPE["STREAM"],
+                    "data": {"chunk": response_text}
+                })
 
-            # 启动消费任务
-            consume_task = asyncio.create_task(consume_generator())
-
-            # 等待流式传输完成（被外部中断或生成器结束）
-            await self._stream_complete.wait()
-
-            # 取消消费任务
-            consume_task.cancel()
-            try:
-                await consume_task
-            except asyncio.CancelledError:
-                pass
+            # 重要：流式结束后发送 END 事件
+            await self.queue.put({
+                "type": HTTP_MESSAGE_TYPE["END"],
+                "data": {}
+            })
 
         except Exception as e:
             logger.error(f"[StreamHTTPMessageEvent] 流式发送时出错: {e}")
             await self.queue.put({
                 "type": HTTP_MESSAGE_TYPE["ERROR"],
                 "data": {"error": str(e)}
+            })
+            # 即使出错也要发送 END
+            await self.queue.put({
+                "type": HTTP_MESSAGE_TYPE["END"],
+                "data": {"error": True}
             })
 
     def mark_conversation_end(self):
