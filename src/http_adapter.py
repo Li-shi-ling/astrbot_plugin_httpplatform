@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 from collections.abc import Coroutine
 
 from quart import Quart, request, jsonify, websocket as quart_ws
+from quart_cors import cors
 from collections.abc import AsyncGenerator
 
 from astrbot import logger
@@ -446,6 +447,15 @@ class HTTPAdapter(Platform):
 
         # Quart 应用
         self.app = Quart(__name__)
+
+        # 添加 CORS 支持
+        self.app = cors(
+            self.app,
+            allow_origin="*",  # 允许所有来源
+            allow_methods=["GET", "POST", "OPTIONS"],  # 允许的方法
+            allow_headers=["Content-Type", "Authorization", "Accept"],  # 允许的请求头
+        )
+
         self._setup_routes()
 
         # 运行状态
