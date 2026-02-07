@@ -32,6 +32,7 @@ from astrbot.api.event import AstrMessageEvent
 # 导入常量和数据类
 from .constants import HTTP_MESSAGE_TYPE, HTTP_EVENT_TYPE, HTTP_STATUS_CODE, WS_CLOSE_CODE
 from .dataclasses import HTTPRequestData, PendingResponse, SessionStats, AdapterStats
+from .tool import BMC2Text
 
 
 # ==================== HTTP 消息事件类 ====================
@@ -150,15 +151,14 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
     ):
         """发送流式消息到消息平台，使用异步生成器"""
         try:
-            # 直接消费生成器，不搞复杂的等待逻辑
             async for message_chain in generator:
-                response_text = str(message_chain)
-                await self.queue.put({
-                    "type": HTTP_MESSAGE_TYPE["STREAM"],
-                    "data": {"chunk": response_text}
-                })
+                for message in message_chain.chain:
+                    response_text = BMC2Text(message)
+                    await self.queue.put({
+                        "type": HTTP_MESSAGE_TYPE["STREAM"],
+                        "data": {"chunk": response_text}
+                    })
 
-            # 重要：流式结束后发送 END 事件
             await self.queue.put({
                 "type": HTTP_MESSAGE_TYPE["END"],
                 "data": {}
