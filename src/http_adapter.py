@@ -12,7 +12,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 from collections.abc import Coroutine
 
-from quart import Quart, request, jsonify, websocket as quart_ws
+from quart import Quart, request, jsonify, websocket as quart_ws, make_response
 from quart_cors import cors
 from collections.abc import AsyncGenerator
 
@@ -448,12 +448,22 @@ class HTTPAdapter(Platform):
         # Quart 应用
         self.app = Quart(__name__)
 
-        # 添加 CORS 支持
+        # 处理 CORS 来源配置
+        cors_origins_config = platform_config.get("cors_origins", "*")
+        if cors_origins_config == "*":
+            cors_origins_list = "*"
+        else:
+            cors_origins_list = cors_origins_config.split(",") if isinstance(cors_origins_config, str) else cors_origins_config
+
+        # 添加 CORS 支持 - 使用更全面的配置
         self.app = cors(
             self.app,
-            allow_origin="*",  # 允许所有来源
-            allow_methods=["GET", "POST", "OPTIONS"],  # 允许的方法
-            allow_headers=["Content-Type", "Authorization", "Accept"],  # 允许的请求头
+            allow_origin=cors_origins_list,
+            allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+            allow_headers=["Content-Type", "Authorization", "Accept", "X-Request-ID", "Origin"],
+            allow_credentials=True,
+            expose_headers=["Content-Type", "Authorization", "X-Accel-Buffering"],
+            max_age=86400,
         )
 
         self._setup_routes()
@@ -479,23 +489,16 @@ class HTTPAdapter(Platform):
     def _setup_routes(self):
         """设置 HTTP 路由"""
 
-        # CORS 中间件
-        @self.app.after_request
-        async def after_request(response):
-            origin = request.headers.get('Origin', '')
-            if origin and (self.cors_origins == "*" or origin in self.cors_origins):
-                response.headers['Access-Control-Allow-Origin'] = origin
-                response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-                response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Request-ID'
-                response.headers['Access-Control-Allow-Credentials'] = 'true'
-                response.headers['Access-Control-Max-Age'] = '86400'
-            return response
+        # OPTIONS 预检请求处理 - 确保所有路径都支持 OPTIONS
+        @self.app.route('/', defaults={'path': ''}, methods=['OPTIONS'])
+        @self.app.route('/<path:path>', methods=['OPTIONS'])
+        async def options_handler(path):
+            """处理所有 OPTIONS 预检请求"""
+            response = make_response('')
+            response.status_code = HTTP_STATUS_CODE["OK"]
 
-        # OPTIONS 预检请求处理
-        @self.app.before_request
-        async def handle_options():
-            if request.method == 'OPTIONS':
-                return '', HTTP_STATUS_CODE["OK"]
+            # quart-cors 会自动处理 CORS 头部，我们只需要返回空响应
+            return response
 
         # 健康检查
         @self.app.route(f'{self.api_prefix}/health', methods=['GET'])
@@ -510,15 +513,19 @@ class HTTPAdapter(Platform):
             })
 
         # 发送消息接口
-        @self.app.route(f'{self.api_prefix}/message', methods=['POST'])
+        @self.app.route(f'{self.api_prefix}/message', methods=['POST', 'OPTIONS'])
         async def send_message():
             """发送消息到 AstrBot"""
+            if request.method == 'OPTIONS':
+                return '', HTTP_STATUS_CODE["OK"]
             return await self._handle_http_message(request)
 
         # 流式消息接口
-        @self.app.route(f'{self.api_prefix}/message/stream', methods=['POST'])
+        @self.app.route(f'{self.api_prefix}/message/stream', methods=['POST', 'OPTIONS'])
         async def send_message_stream():
             """流式发送消息到 AstrBot"""
+            if request.method == 'OPTIONS':
+                return '', HTTP_STATUS_CODE["OK"]
             return await self._handle_http_stream_message(request)
 
         # WebSocket 接口
@@ -529,21 +536,27 @@ class HTTPAdapter(Platform):
                 await self._handle_websocket_connection()
 
         # 会话管理接口
-        @self.app.route(f'{self.api_prefix}/sessions', methods=['GET'])
+        @self.app.route(f'{self.api_prefix}/sessions', methods=['GET', 'OPTIONS'])
         async def list_sessions():
             """获取所有活跃会话"""
+            if request.method == 'OPTIONS':
+                return '', HTTP_STATUS_CODE["OK"]
             return await self._handle_list_sessions(request)
 
         # 清理会话接口
-        @self.app.route(f'{self.api_prefix}/sessions/<session_id>', methods=['DELETE'])
+        @self.app.route(f'{self.api_prefix}/sessions/<session_id>', methods=['DELETE', 'OPTIONS'])
         async def delete_session(session_id):
             """删除指定会话"""
+            if request.method == 'OPTIONS':
+                return '', HTTP_STATUS_CODE["OK"]
             return await self._handle_delete_session(request, session_id)
 
         # 统计信息接口
-        @self.app.route(f'{self.api_prefix}/stats', methods=['GET'])
+        @self.app.route(f'{self.api_prefix}/stats', methods=['GET', 'OPTIONS'])
         async def get_stats():
             """获取统计信息"""
+            if request.method == 'OPTIONS':
+                return '', HTTP_STATUS_CODE["OK"]
             return await self._handle_get_stats(request)
 
     async def _handle_http_message(self, request_obj) -> Any:
@@ -1024,6 +1037,7 @@ class HTTPAdapter(Platform):
         logger.info(f"[HTTPAdapter] API 前缀: {self.api_prefix}")
         logger.info(f"[HTTPAdapter] WebSocket: {'启用' if self.enable_websocket else '禁用'}")
         logger.info(f"[HTTPAdapter] 鉴权: {'启用' if self.auth_token else '禁用'}")
+        logger.info(f"[HTTPAdapter] CORS 来源: {self.cors_origins}")
 
         self._running = True
 
