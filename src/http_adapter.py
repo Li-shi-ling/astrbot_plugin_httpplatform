@@ -461,7 +461,7 @@ class HTTPAdapter(Platform):
             allow_origin=cors_origins_list,
             allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
             allow_headers=["Content-Type", "Authorization", "Accept", "X-Request-ID", "Origin"],
-            allow_credentials=True,
+            allow_credentials=False,
             expose_headers=["Content-Type", "Authorization", "X-Accel-Buffering"],
             max_age=86400,
         )
