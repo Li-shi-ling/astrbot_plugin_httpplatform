@@ -112,13 +112,6 @@ class HTTPAdapterPlugin(Star):
             logger.error(f"[HTTPAdapter] 导入 HTTP 适配器失败: {e}")
             raise
 
-        # 同时导入简单版本（可选）
-        try:
-            from .src.simple_http_adapter import SimpleHTTPAdapter
-            logger.info("[HTTPAdapter] 简单 HTTP 适配器导入成功")
-        except ImportError:
-            logger.warning("[HTTPAdapter] 简单 HTTP 适配器未找到，跳过导入")
-
     def _register_config(self):
         """注册配置信息到平台"""
         if self._registered:
@@ -164,3 +157,11 @@ class HTTPAdapterPlugin(Star):
         """终止插件"""
         self._unregister_config()
         logger.info("[HTTPAdapter] HTTP 适配器插件终止")
+
+    @filter.command("sd")
+    async def shut_down(self, event: AstrMessageEvent):
+        pass
+
+    @filter.command("se")
+    async def start_server(self, event: AstrMessageEvent):
+        pass

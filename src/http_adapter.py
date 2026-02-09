@@ -154,10 +154,11 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
         try:
             async for message_chain in generator:
                 for message in message_chain.chain:
-                    response_text = BMC2Text(message)
+                    response_text, text_type = BMC2Text(message)
                     await self.queue.put({
                         "type": HTTP_MESSAGE_TYPE["STREAM"],
-                        "data": {"chunk": response_text}
+                        "data": {"chunk": response_text},
+                        "text_type": text_type
                     })
 
             await self.queue.put({
