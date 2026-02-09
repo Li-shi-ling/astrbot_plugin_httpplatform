@@ -107,6 +107,7 @@ class HTTPAdapterPlugin(Star):
         # 装饰器会自动注册适配器
         try:
             from .src.http_adapter import HTTPAdapter
+            self._http_adapter_cls = HTTPAdapter
             logger.info("[HTTPAdapter] HTTP 适配器导入成功")
         except ImportError as e:
             logger.error(f"[HTTPAdapter] 导入 HTTP 适配器失败: {e}")
@@ -158,10 +159,23 @@ class HTTPAdapterPlugin(Star):
         self._unregister_config()
         logger.info("[HTTPAdapter] HTTP 适配器插件终止")
 
-    @filter.command("sd")
-    async def shut_down(self, event: AstrMessageEvent):
+    @filter.command_group("http")
+    async def http(self):
         pass
 
-    @filter.command("se")
-    async def start_server(self, event: AstrMessageEvent):
-        pass
+    @http.command("ghp")
+    async def inithttpadapter(self, event: AstrMessageEvent):
+        """获取所有HTTPAdapter实例到内存"""
+        self.httpadapter = {}
+        for platform in self.context.platform_manager.platform_insts:
+            if isinstance(platform, self._http_adapter_cls):
+                meta = platform.meta()
+                if hasattr(meta, 'id'):
+                    platform_id = meta.id
+                else:
+                    platform_id = None
+                if platform_id:
+                    self.httpadapter[platform_id] = platform
+                else:
+                    logger.debug("[HTTPAdapter] 存在没有名字的HTTPAdapter实例")
+        yield event.plain_result("HTTPAdapter实例:\n" + "\n".join(list(self.httpadapter)))
