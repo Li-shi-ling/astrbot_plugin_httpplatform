@@ -139,18 +139,17 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
 
     async def send(self, message_chain: MessageChain):
         """发送完整响应 - 这是单条消息的结束"""
-        response_text = str(message_chain)
-
         # 如果正在流式传输，先发送流式结束
         if self._is_streaming:
             await self._end_streaming()
 
-        # 发送完整消息
-        await self.queue.put({
-            "type": HTTP_MESSAGE_TYPE["COMPLETE"],
-            "data": {"message": response_text}
-        })
-
+        for message in message_chain.chain:
+            response_text, text_type = BMC2Text(message)
+            await self.queue.put({
+                "type": HTTP_MESSAGE_TYPE["STREAM"],
+                "data": {"chunk": response_text},
+                "text_type": text_type
+            })
         # 注意：不发送 END，因为可能还有后续消息
 
     async def _end_streaming(self):
