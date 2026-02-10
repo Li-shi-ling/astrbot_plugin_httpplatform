@@ -70,6 +70,7 @@ class HTTPMessageEvent(AstrMessageEvent):
         self.set_extra("content_type", request_data.content_type)
         self.set_extra("accept", request_data.accept)
         self.set_extra("request_timestamp", request_data.timestamp)
+        self.set_extra("data",request_data.data)
 
     @property
     def adapter(self):
@@ -639,7 +640,8 @@ class HTTPAdapter(Platform):
                 remote_addr=request_obj.remote_addr,
                 user_agent=request_obj.user_agent.string if request_obj.user_agent else None,
                 content_type=request_obj.content_type,
-                accept=request_obj.headers.get('Accept')
+                accept=request_obj.headers.get('Accept'),
+                data=data  # 这里传入请求体数据
             )
 
             # 必需参数检查

@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 import asyncio
 
-
 @dataclass
 class HTTPRequestData:
     """HTTP 请求数据"""
@@ -19,7 +18,12 @@ class HTTPRequestData:
     content_type: Optional[str] = None
     accept: Optional[str] = None
     timestamp: float = field(default_factory=time.time)
+    data: Optional[Dict[str, Any]] = None  # 修改：修正类型注解，默认值为None
 
+    def __post_init__(self):
+        # 确保 data 是字典类型
+        if self.data is None:
+            self.data = {}
 
 @dataclass
 class HTTPResponseData:
