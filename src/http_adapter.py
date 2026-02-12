@@ -651,7 +651,7 @@ class HTTPAdapter(Platform):
                 return jsonify({"error": "message 参数是必需的"}), HTTP_STATUS_CODE["BAD_REQUEST"]
 
             # 获取会话ID或创建新的
-            platform = data.get('platform', "pupu")
+            platform = data.get('platform', "")
             user_id = data.get('user_id', '0')
             username = data.get('username', '外部用户')
             session_id = f"{platform}_{user_id}"
@@ -768,9 +768,10 @@ class HTTPAdapter(Platform):
                 data=data
             )
 
-            session_id = data.get('session_id', str(uuid.uuid4()))
-            user_id = data.get('user_id', 'external_user')
+            platform = data.get('platform', "")
+            user_id = data.get('user_id', '0')
             username = data.get('username', '外部用户')
+            session_id = f"{platform}_{user_id}"
 
             # 创建 SSE 响应生成器
             async def generate():
