@@ -355,7 +355,8 @@ class HTTPSession:
             url=f"ws://{self.adapter.http_host}:{self.adapter.http_port}{self.adapter.api_prefix}/ws",
             headers=headers,
             remote_addr=self.client_ip,
-            user_agent=self.user_agent
+            user_agent=self.user_agent,
+            data=data
         )
 
         # 生成事件 ID
@@ -650,9 +651,10 @@ class HTTPAdapter(Platform):
                 return jsonify({"error": "message 参数是必需的"}), HTTP_STATUS_CODE["BAD_REQUEST"]
 
             # 获取会话ID或创建新的
-            session_id = data.get('session_id', str(uuid.uuid4()))
-            user_id = data.get('user_id', 'external_user')
+            platform = data.get('platform', "pupu")
+            user_id = data.get('user_id', '0')
             username = data.get('username', '外部用户')
+            session_id = f"{platform}_{user_id}"
 
             # 创建事件并提交
             event_id = str(uuid.uuid4())
@@ -762,7 +764,8 @@ class HTTPAdapter(Platform):
                 remote_addr=request_obj.remote_addr,
                 user_agent=request_obj.user_agent.string if request_obj.user_agent else None,
                 content_type=request_obj.content_type,
-                accept=request_obj.headers.get('Accept')
+                accept=request_obj.headers.get('Accept'),
+                data=data
             )
 
             session_id = data.get('session_id', str(uuid.uuid4()))

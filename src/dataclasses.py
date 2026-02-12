@@ -1,7 +1,7 @@
 """
 HTTP 适配器数据类定义
 """
-
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
@@ -22,6 +22,8 @@ class HTTPRequestData:
 
     def __post_init__(self):
         # 确保 data 是字典类型
+        if isinstance(self.data, str):
+            self.data = json.loads(self.data)
         if self.data is None:
             self.data = {}
 
