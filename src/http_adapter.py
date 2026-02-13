@@ -192,16 +192,16 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
                 "data": {"error": True}
             })
 
-    def mark_conversation_end(self):
-        """标记整个对话结束（由外部调用）"""
-        # 结束任何正在进行的流式传输
-        asyncio.create_task(self._end_streaming())
+    async def mark_conversation_end(self):  # 1. 改为 async 方法
+        """标记整个对话结束"""
+        # 2. 直接 await，确保任务在 Event 对象销毁前执行完成
+        await self._end_streaming()
 
-        # 发送最终结束事件
-        asyncio.create_task(self.queue.put({
+        # 3. 确保 END 信号入队
+        await self.queue.put({
             "type": HTTP_MESSAGE_TYPE["END"],
             "data": {}
-        }))
+        })
 
 class WebSocketMessageEvent(HTTPMessageEvent):
     """WebSocket 消息事件"""
@@ -543,6 +543,15 @@ class HTTPAdapter(Platform):
             support_proactive_message=True,
         )
 
+        self._background_tasks = set() # 用于追踪任务
+
+    def _start_task(self, coro: Coroutine):
+        """统一管理后台任务，防止销毁报错"""
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
+
     def meta(self) -> PlatformMetadata:
         return self._metadata
 
@@ -872,13 +881,9 @@ class HTTPAdapter(Platform):
                 except asyncio.CancelledError:
                     # 连接被取消
                     logger.info(f"[HTTPAdapter] SSE连接被取消: {event_id}")
-                    yield f"event: {HTTP_MESSAGE_TYPE['END']}\ndata: {{'reason': 'cancelled'}}\n\n"
                 except Exception as e:
                     logger.error(f"[HTTPAdapter] 生成SSE时出错: {e}", exc_info=True)
-                    yield f"event: {HTTP_MESSAGE_TYPE['ERROR']}\ndata: {{'error': str(e), 'event_id': event_id}}\n\n"
-
                 finally:
-                    # 清理资源
                     if event_id in self.pending_responses:
                         self.pending_responses.pop(event_id, None)
                     logger.info(f"[HTTPAdapter] SSE连接结束: {event_id}, 会话: {session_id}")
@@ -1151,9 +1156,23 @@ class HTTPAdapter(Platform):
                 logger.error(f"[HTTPAdapter] 清理循环出错: {e}")
 
     async def terminate(self):
-        """终止适配器"""
-        logger.info("[HTTPAdapter] 终止适配器...")
+        """终止适配器并清理所有挂起任务"""
+        logger.info("[HTTPAdapter] 正在关闭，清理异步任务...")
         self._running = False
+
+        # 清理后台任务，防止 "Task was destroyed but it is pending"
+        if self._background_tasks:
+            for task in list(self._background_tasks):
+                task.cancel()
+
+            # 等待任务取消完成，不抛出异常
+            await asyncio.gather(*self._background_tasks, return_exceptions=True)
+
+        # 清理未完成的 Future
+        for event_id in list(self.pending_responses.keys()):
+            pending = self.pending_responses.pop(event_id, None)
+            if pending and not pending.future.done():
+                pending.future.set_exception(asyncio.CancelledError())
 
         # 取消清理任务
         if self._cleanup_task:
