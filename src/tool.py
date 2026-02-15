@@ -70,7 +70,6 @@ def BMC2Text(data: BaseMessageComponent) -> tuple[str, str]:
     """
     return json.dumps(data.toDict()), str(data.type)
 
-
 def Json2BMC(data: Dict[str, Any]) -> BaseMessageComponent:
     """
     将字典格式的消息数据转换为对应的 BaseMessageComponent 对象
@@ -193,7 +192,6 @@ def Json2BMC(data: Dict[str, Any]) -> BaseMessageComponent:
     except TypeError as e:
         # 如果参数不匹配，尝试只传递必要的参数
         return component_class(**{k: v for k, v in data_content.items() if k in component_class.__fields__})
-
 
 # 辅助函数：解析消息链
 def Json2BMCChain(data_list: List[Dict[str, Any]]) -> List[BaseMessageComponent]:
