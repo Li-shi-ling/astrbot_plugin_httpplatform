@@ -703,9 +703,23 @@ class HTTPAdapter(Platform):
             config.bind = [f"{self.http_host}:{self.http_port}"]
             config.use_reloader = False
 
-            # 启动服务器
-            await hypercorn.asyncio.serve(self.app, config)
+            # 使用任务包装服务器启动，以便能够响应信号
+            server_task = asyncio.create_task(hypercorn.asyncio.serve(self.app, config))
+            
+            # 等待服务器任务完成或被取消
+            await server_task
 
+        except KeyboardInterrupt:
+            # 捕获 Ctrl+C 信号
+            logger.info("[HTTPAdapter] 收到退出信号，正在停止服务器...")
+            self._running = False
+            # 取消服务器任务
+            if 'server_task' in locals():
+                server_task.cancel()
+                try:
+                    await server_task
+                except asyncio.CancelledError:
+                    pass
         except Exception as e:
             logger.error(f"[HTTPAdapter] HTTP 服务器启动失败: {e}", exc_info=True)
             self._running = False
@@ -714,6 +728,13 @@ class HTTPAdapter(Platform):
                 self._cleanup_task.cancel()
                 try:
                     await self._cleanup_task
+                except asyncio.CancelledError:
+                    pass
+            # 确保服务器任务被取消
+            if 'server_task' in locals():
+                server_task.cancel()
+                try:
+                    await server_task
                 except asyncio.CancelledError:
                     pass
 
