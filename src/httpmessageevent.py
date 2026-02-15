@@ -1,13 +1,14 @@
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.event import MessageChain
-from .dataclasses import HTTPRequestData, PendingResponse, SessionStats, AdapterStats
-from .constants import HTTP_MESSAGE_TYPE, HTTP_EVENT_TYPE, HTTP_STATUS_CODE
-from collections.abc import AsyncGenerator
 from astrbot import logger
+
+from .dataclasses import HTTPRequestData
+from .constants import HTTP_MESSAGE_TYPE, HTTP_EVENT_TYPE
 from .tool import BMC2Text
+
+from collections.abc import AsyncGenerator
 import asyncio
 import json
-import time
 
 # ==================== HTTP 消息事件类 ====================
 class HTTPMessageEvent(AstrMessageEvent):
@@ -59,9 +60,9 @@ class HTTPMessageEvent(AstrMessageEvent):
         raise NotImplementedError("子类必须实现 send 方法")
 
     async def send_streaming(
-        self,
-        generator: AsyncGenerator[MessageChain, None],
-        use_fallback: bool = False,
+            self,
+            generator: AsyncGenerator[MessageChain, None],
+            use_fallback: bool = False,
     ):
         """发送流式消息到消息平台，使用异步生成器"""
         # HTTP 适配器的流式处理
@@ -74,88 +75,85 @@ class HTTPMessageEvent(AstrMessageEvent):
             raise
 
 class StandardHTTPMessageEvent(HTTPMessageEvent):
-    """标准 HTTP 消息事件"""
+    """标准 HTTP 消息事件
+    特点：send方法直接处理完所有消息链条后发出去，send_streaming方法获取完所有数据后一并发出去
+    """
 
     def __init__(self, message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data):
         super().__init__(message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data)
-        self._message_buffer = []  # 消息缓冲区，收集所有消息（使用BMC2Text处理后的结果）
-        self._conversation_ended = False  # 标记对话是否已经结束
         self._pending_response = None  # 保存待处理响应
 
     async def send(self, message_chain: MessageChain):
-        """重写 send 方法，使用BMC2Text收集消息而不是立即返回"""
+        """
+        直接处理完整个消息链，立即返回响应
+        """
+        # 处理消息链
+        full_response = []
         for message in message_chain.chain:
             response_text, text_type = BMC2Text(message)
-            self._message_buffer.append({
+            full_response.append({
                 "content": response_text,
                 "type": text_type
             })
 
-    async def send_streaming(
-        self,
-        generator: AsyncGenerator[MessageChain, None],
-        use_fallback: bool = False,
-    ):
-        """发送流式消息到消息平台，使用异步生成器"""
-        buffer = None
-        async for chain in generator:
-            if not buffer:
-                buffer = chain
-            else:
-                buffer.chain.extend(chain.chain)
-        if not buffer:
-            return None
-        await self.send(buffer)
-        return await super().send_streaming(generator, use_fallback)
+        # 如果没有消息，返回空数组
+        if not full_response:
+            full_response = []
 
-    async def mark_conversation_end(self):
-        """标记对话结束，返回所有收集的消息（使用BMC2Text处理后的结果）"""
-        # 避免重复调用
-        if self._conversation_ended:
-            return
-        
-        # 尝试从 pending_responses 中获取待处理响应
+        # 获取待处理响应
         pending = None
         if self.event_id in self._adapter.pending_responses:
             pending = self._adapter.pending_responses.pop(self.event_id)
         elif self._pending_response:
             pending = self._pending_response
-        
-        # 如果找到待处理响应且未完成，则设置结果
-        if pending and not pending.future.done():
-            # 将所有收集的消息合并为一个响应
-            full_response = []
-            for msg in self._message_buffer:
-                full_response.append({
-                    "content": msg["content"],
-                    "type": msg["type"]
-                })
-            # 如果消息缓冲区为空，返回空数组
-            if not full_response:
-                full_response = []
-            pending.future.set_result(json.dumps(full_response, ensure_ascii=False))
-            # 标记对话已经结束
-            self._conversation_ended = True
-        else:
-            # 如果没有找到待处理响应或future已经完成，记录日志
-            logger.warning(f"[StandardHTTPMessageEvent] 没有找到待处理响应或future已经完成: event_id={self.event_id}, buffer_size={len(self._message_buffer)}")
 
-    def set_result(self, result):
-        """重写set_result方法，在设置结果时调用mark_conversation_end"""
-        super().set_result(result)
-        # 启动一个任务来调用mark_conversation_end
-        import asyncio
-        asyncio.create_task(self.mark_conversation_end())
+        # 设置响应结果
+        if pending and not pending.future.done():
+            result_json = json.dumps(full_response, ensure_ascii=False)
+            pending.future.set_result(result_json)
+
+            logger.debug(
+                f"[StandardHTTPMessageEvent] 已发送响应 (event_id: {self.event_id}, 消息数: {len(full_response)})")
+        else:
+            logger.warning(f"[StandardHTTPMessageEvent] 没有找到待处理响应: event_id={self.event_id}")
+
+    async def send_streaming(
+            self,
+            generator: AsyncGenerator[MessageChain, None],
+            use_fallback: bool = False,
+    ):
+        """
+        获取完所有流式数据后，一次性发送
+        """
+        # 收集所有流式数据
+        collected_chains = []
+        async for chain in generator:
+            collected_chains.append(chain)
+
+        # 如果没有收集到任何数据，直接返回
+        if not collected_chains:
+            return None
+
+        # 合并所有消息链
+        merged_chain = MessageChain()
+        for chain in collected_chains:
+            merged_chain.chain.extend(chain.chain)
+
+        # 一次性发送合并后的消息
+        await self.send(merged_chain)
+
+        return None
 
 class StreamHTTPMessageEvent(HTTPMessageEvent):
-    """流式 HTTP 消息事件"""
+    """流式 HTTP 消息事件
+    特点：send方法不处理（保持不动），send_streaming方法流式发送消息
+    """
 
     def __init__(self, message_str, message_obj, platform_meta, session_id, adapter, queue, event_id, request_data):
         super().__init__(message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data)
         self.queue = queue
-        self._message_buffer = []  # 新增：消息缓冲区
-        self._is_streaming = False  # 新增：是否正在流式传输
-        self._stream_complete = asyncio.Event()  # 新增：流式完成事件
+        self._is_streaming = False  # 标记是否正在流式传输
+        self._stream_complete = asyncio.Event()  # 流式完成事件
         self.set_extra("event_type", HTTP_EVENT_TYPE["STREAMING"])
         self.set_extra("streaming", True)
 
@@ -172,7 +170,6 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
                 "data": {"chunk": response_text},
                 "text_type": text_type
             })
-        # 注意：不发送 END，因为可能还有后续消息
 
     async def _end_streaming(self):
         """结束当前的流式传输"""
@@ -185,8 +182,18 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             generator: AsyncGenerator[MessageChain, None],
             use_fallback: bool = False,
     ):
-        """发送流式消息到消息平台，使用异步生成器"""
+        """
+        流式发送消息到客户端
+
+        这个方法会实时地将生成器产生的每个消息块发送给客户端，
+        保持流式传输的特性
+        """
         try:
+            # 标记开始流式传输
+            self._is_streaming = True
+            self._stream_complete.clear()
+
+            # 流式发送每个消息块
             async for message_chain in generator:
                 for message in message_chain.chain:
                     response_text, text_type = BMC2Text(message)
@@ -196,37 +203,35 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
                         "text_type": text_type
                     })
 
+            # 发送流式结束标记
             await self.queue.put({
                 "type": HTTP_MESSAGE_TYPE["END"],
                 "data": {}
             })
 
+            # 标记流式传输完成
+            self._is_streaming = False
+            self._stream_complete.set()
+
         except Exception as e:
             logger.error(f"[StreamHTTPMessageEvent] 流式发送时出错: {e}")
-            await self.queue.put({
-                "type": HTTP_MESSAGE_TYPE["ERROR"],
-                "data": {"error": str(e)}
-            })
-            # 即使出错也要发送 END
-            await self.queue.put({
-                "type": HTTP_MESSAGE_TYPE["END"],
-                "data": {"error": True}
-            })
 
-    async def mark_conversation_end(self):  # 1. 改为 async 方法
-        """标记整个对话结束"""
-        # 2. 直接 await，确保任务在 Event 对象销毁前执行完成
-        await self._end_streaming()
+            # 发送错误信息
+            try:
+                await self.queue.put({
+                    "type": HTTP_MESSAGE_TYPE["ERROR"],
+                    "data": {"error": str(e)}
+                })
+                # 即使出错也要发送 END
+                await self.queue.put({
+                    "type": HTTP_MESSAGE_TYPE["END"],
+                    "data": {"error": True}
+                })
+            except Exception as queue_error:
+                logger.error(f"[StreamHTTPMessageEvent] 发送错误信息时失败: {queue_error}")
 
-        # 3. 确保 END 信号入队
-        await self.queue.put({
-            "type": HTTP_MESSAGE_TYPE["END"],
-            "data": {}
-        })
+            # 标记流式传输完成（即使出错）
+            self._is_streaming = False
+            self._stream_complete.set()
 
-    def set_result(self, result):
-        """重写set_result方法，在设置结果时调用mark_conversation_end"""
-        super().set_result(result)
-        # 启动一个任务来调用mark_conversation_end
-        import asyncio
-        asyncio.create_task(self.mark_conversation_end())
+            raise
