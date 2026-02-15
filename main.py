@@ -100,7 +100,24 @@ class HTTPAdapterPlugin(Star):
         # 导入 HTTP 适配器以注册它
         # 装饰器会自动注册适配器
         try:
-            from .src.http_adapter import HTTPAdapter
+            import astrbot.cli
+            version = None
+            if hasattr(astrbot.cli, '__version__'):
+                version = astrbot.cli.__version__
+            if not version:
+                logger.warning("[astrbook] 没有找到astrbot版本号,使用4.14.8前的metadata注册方案")
+                self._register_config()
+                from .src.http_adapter_114 import HTTPAdapter
+            else:
+                v1 = [int(x) for x in version.split('.')]
+                v2 = [int(x) for x in "4.16.0".split('.')]
+                max_len = max(len(v1), len(v2))
+                v1 += [0] * (max_len - len(v1))
+                v2 += [0] * (max_len - len(v2))
+                if v1 >= v2:
+                    from .src.http_adapter_116 import HTTPAdapter
+                else:
+                    from .src.http_adapter_114 import HTTPAdapter
             self._http_adapter_cls = HTTPAdapter
             logger.info("[HTTPAdapter] HTTP 适配器导入成功")
         except ImportError as e:
