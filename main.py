@@ -107,7 +107,7 @@ class HTTPAdapterPlugin(Star):
             if not version:
                 logger.warning("[astrbook] 没有找到astrbot版本号,使用4.14.8前的metadata注册方案")
                 self._register_config()
-                from .src.http_adapter_114 import HTTPAdapter
+                from .src.http_adapter_414 import HTTPAdapter
             else:
                 v1 = [int(x) for x in version.split('.')]
                 v2 = [int(x) for x in "4.16.0".split('.')]
@@ -115,9 +115,9 @@ class HTTPAdapterPlugin(Star):
                 v1 += [0] * (max_len - len(v1))
                 v2 += [0] * (max_len - len(v2))
                 if v1 >= v2:
-                    from .src.http_adapter_116 import HTTPAdapter
+                    from .src.http_adapter_416 import HTTPAdapter
                 else:
-                    from .src.http_adapter_114 import HTTPAdapter
+                    from .src.http_adapter_414 import HTTPAdapter
             self._http_adapter_cls = HTTPAdapter
             logger.info("[HTTPAdapter] HTTP 适配器导入成功")
         except ImportError as e:
