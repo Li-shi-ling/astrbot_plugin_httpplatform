@@ -80,6 +80,7 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         super().__init__(message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data)
         self._message_buffer = []  # 消息缓冲区，收集所有消息（使用BMC2Text处理后的结果）
         self._conversation_ended = False  # 标记对话是否已经结束
+        self._pending_response = None  # 保存待处理响应
 
     async def send(self, message_chain: MessageChain):
         """重写 send 方法，使用BMC2Text收集消息而不是立即返回"""
@@ -100,8 +101,6 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         try:
             async for message_chain in generator:
                 await self.send(message_chain)
-            # 遍历完所有消息后，标记对话结束
-            await self.mark_conversation_end()
         except Exception as e:
             logger.error(f"[StandardHTTPMessageEvent] 流式发送时出错: {e}")
             raise
@@ -112,19 +111,31 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         if self._conversation_ended:
             return
         
+        # 尝试从 pending_responses 中获取待处理响应
+        pending = None
         if self.event_id in self._adapter.pending_responses:
             pending = self._adapter.pending_responses.pop(self.event_id)
-            if not pending.future.done():
-                # 将所有收集的消息合并为一个响应
+        elif self._pending_response:
+            pending = self._pending_response
+        
+        # 如果找到待处理响应且未完成，则设置结果
+        if pending and not pending.future.done():
+            # 将所有收集的消息合并为一个响应
+            full_response = []
+            for msg in self._message_buffer:
+                full_response.append({
+                    "content": msg["content"],
+                    "type": msg["type"]
+                })
+            # 如果消息缓冲区为空，返回空数组
+            if not full_response:
                 full_response = []
-                for msg in self._message_buffer:
-                    full_response.append({
-                        "content": msg["content"],
-                        "type": msg["type"]
-                    })
-                pending.future.set_result(json.dumps(full_response, ensure_ascii=False))
-                # 标记对话已经结束
-                self._conversation_ended = True
+            pending.future.set_result(json.dumps(full_response, ensure_ascii=False))
+            # 标记对话已经结束
+            self._conversation_ended = True
+        else:
+            # 如果没有找到待处理响应或future已经完成，记录日志
+            logger.warning(f"[StandardHTTPMessageEvent] 没有找到待处理响应或future已经完成: event_id={self.event_id}, buffer_size={len(self._message_buffer)}")
 
     def set_result(self, result):
         """重写set_result方法，在设置结果时调用mark_conversation_end"""
