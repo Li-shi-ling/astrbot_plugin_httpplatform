@@ -97,13 +97,16 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         use_fallback: bool = False,
     ):
         """发送流式消息到消息平台，使用异步生成器"""
-        # 对于标准 HTTP 适配器，流式发送自动转变为普通发送
-        try:
-            async for message_chain in generator:
-                await self.send(message_chain)
-        except Exception as e:
-            logger.error(f"[StandardHTTPMessageEvent] 流式发送时出错: {e}")
-            raise
+        buffer = None
+        async for chain in generator:
+            if not buffer:
+                buffer = chain
+            else:
+                buffer.chain.extend(chain.chain)
+        if not buffer:
+            return None
+        await self.send(buffer)
+        return await super().send_streaming(generator, use_fallback)
 
     async def mark_conversation_end(self):
         """标记对话结束，返回所有收集的消息（使用BMC2Text处理后的结果）"""
@@ -220,3 +223,10 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             "type": HTTP_MESSAGE_TYPE["END"],
             "data": {}
         })
+
+    def set_result(self, result):
+        """重写set_result方法，在设置结果时调用mark_conversation_end"""
+        super().set_result(result)
+        # 启动一个任务来调用mark_conversation_end
+        import asyncio
+        asyncio.create_task(self.mark_conversation_end())
