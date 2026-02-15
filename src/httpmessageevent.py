@@ -76,13 +76,14 @@ class HTTPMessageEvent(AstrMessageEvent):
 class StandardHTTPMessageEvent(HTTPMessageEvent):
     """标准 HTTP 消息事件"""
 
+    def __init__(self, message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data):
+        super().__init__(message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data)
+        self._message_buffer = []  # 消息缓冲区，收集所有消息
+
     async def send(self, message_chain: MessageChain):
-        """重写 send 方法，用于返回响应"""
+        """重写 send 方法，收集消息而不是立即返回"""
         response_text = str(message_chain)
-        if self.event_id in self._adapter.pending_responses:
-            pending = self._adapter.pending_responses.pop(self.event_id)
-            if not pending.future.done():
-                pending.future.set_result(response_text)
+        self._message_buffer.append(response_text)
 
     async def send_streaming(
         self,
@@ -98,8 +99,24 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
             logger.error(f"[StandardHTTPMessageEvent] 流式发送时出错: {e}")
             raise
 
+    async def mark_conversation_end(self):
+        """标记对话结束，返回所有收集的消息"""
+        if self.event_id in self._adapter.pending_responses:
+            pending = self._adapter.pending_responses.pop(self.event_id)
+            if not pending.future.done():
+                # 将所有收集的消息合并为一个响应
+                full_response = "\n".join(self._message_buffer)
+                pending.future.set_result(full_response)
+
+    def set_result(self, result):
+        """重写set_result方法，在设置结果时调用mark_conversation_end"""
+        super().set_result(result)
+        # 启动一个任务来调用mark_conversation_end
+        import asyncio
+        asyncio.create_task(self.mark_conversation_end())
+
 class StreamHTTPMessageEvent(HTTPMessageEvent):
-    """流式 HTTP 消息事件 - 修复版"""
+    """流式 HTTP 消息事件"""
 
     def __init__(self, message_str, message_obj, platform_meta, session_id, adapter, queue, event_id, request_data):
         super().__init__(message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data)
