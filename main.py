@@ -17,7 +17,6 @@ from astrbot.api import logger
 from astrbot.api.platform import register_platform_adapter
 from .src.http_adapter import HTTPAdapter
 
-
 # ==================== HTTP 适配器插件 ====================
 class HTTPAdapterPlugin(Star):
     """

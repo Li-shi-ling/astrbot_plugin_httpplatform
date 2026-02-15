@@ -79,6 +79,7 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
     def __init__(self, message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data):
         super().__init__(message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data)
         self._message_buffer = []  # 消息缓冲区，收集所有消息（使用BMC2Text处理后的结果）
+        self._conversation_ended = False  # 标记对话是否已经结束
 
     async def send(self, message_chain: MessageChain):
         """重写 send 方法，使用BMC2Text收集消息而不是立即返回"""
@@ -99,12 +100,18 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         try:
             async for message_chain in generator:
                 await self.send(message_chain)
+            # 遍历完所有消息后，标记对话结束
+            await self.mark_conversation_end()
         except Exception as e:
             logger.error(f"[StandardHTTPMessageEvent] 流式发送时出错: {e}")
             raise
 
     async def mark_conversation_end(self):
         """标记对话结束，返回所有收集的消息（使用BMC2Text处理后的结果）"""
+        # 避免重复调用
+        if self._conversation_ended:
+            return
+        
         if self.event_id in self._adapter.pending_responses:
             pending = self._adapter.pending_responses.pop(self.event_id)
             if not pending.future.done():
@@ -116,6 +123,8 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
                         "type": msg["type"]
                     })
                 pending.future.set_result(json.dumps(full_response, ensure_ascii=False))
+                # 标记对话已经结束
+                self._conversation_ended = True
 
     def set_result(self, result):
         """重写set_result方法，在设置结果时调用mark_conversation_end"""
