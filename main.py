@@ -15,7 +15,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.core.config.default import CONFIG_METADATA_2
 from astrbot.api import logger
 from astrbot.api.platform import register_platform_adapter
-from src.http_adapter import HTTPAdapter
+from .src.http_adapter import HTTPAdapter
 
 
 # ==================== HTTP 适配器插件 ====================
