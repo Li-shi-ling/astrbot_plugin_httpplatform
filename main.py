@@ -6,9 +6,8 @@ AstrBot HTTP Adapter 示例程序
 
 主要功能：
 1. 启动 HTTP 服务器，提供 REST API 接口
-2. 支持 WebSocket 连接
-3. 提供会话管理和统计信息
-4. 完整的鉴权和安全控制
+2. 提供会话管理和统计信息
+3. 完整的鉴权和安全控制
 """
 
 from astrbot.api.star import Context, Star, register
@@ -48,12 +47,7 @@ class HTTPAdapterPlugin(Star):
             "hint": "API 接口的路径前缀，默认 /api/v1",
             "default": "/api/v1"
         },
-        "enable_websocket": {
-            "description": "启用 WebSocket",
-            "type": "bool",
-            "hint": "是否启用 WebSocket 支持",
-            "default": True
-        },
+        
         "enable_http_api": {
             "description": "启用 HTTP API",
             "type": "bool",

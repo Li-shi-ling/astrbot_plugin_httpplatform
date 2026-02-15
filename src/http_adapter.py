@@ -12,7 +12,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 from collections.abc import Coroutine
 
-from quart import Quart, request, jsonify, websocket as quart_ws, make_response
+from quart import Quart, request, jsonify, make_response
 from quart_cors import cors
 
 from astrbot import logger
@@ -29,9 +29,9 @@ from astrbot.api.platform import (
 from astrbot.core.platform.astr_message_event import MessageSesion
 
 # 导入常量和数据类
-from .constants import HTTP_MESSAGE_TYPE, HTTP_EVENT_TYPE, HTTP_STATUS_CODE, WS_CLOSE_CODE
+from .constants import HTTP_MESSAGE_TYPE, HTTP_EVENT_TYPE, HTTP_STATUS_CODE
 from .dataclasses import HTTPRequestData, PendingResponse, SessionStats, AdapterStats
-from .httpmessageevent import StandardHTTPMessageEvent, WebSocketMessageEvent, HTTPMessageEvent, StreamHTTPMessageEvent
+from .httpmessageevent import StandardHTTPMessageEvent, HTTPMessageEvent, StreamHTTPMessageEvent
 from .httpsession import HTTPSession
 from .tool import Json2BMCChain
 
@@ -43,7 +43,6 @@ from .tool import Json2BMCChain
         "http_host": "0.0.0.0",
         "http_port": 8080,
         "api_prefix": "/api/v1",
-        "enable_websocket": True,
         "enable_http_api": True,
         "auth_token": "",
         "cors_origins": "*",
@@ -71,7 +70,6 @@ class HTTPAdapter(Platform):
         self.http_host = platform_config.get("http_host", "0.0.0.0")
         self.http_port = int(platform_config.get("http_port", 8080))
         self.api_prefix = platform_config.get("api_prefix", "/api/v1").rstrip("/")
-        self.enable_websocket = platform_config.get("enable_websocket", True)
         self.enable_http_api = platform_config.get("enable_http_api", True)
         self.auth_token = platform_config.get("auth_token", "")
         self.cors_origins = platform_config.get("cors_origins", "*").split(",")
@@ -177,13 +175,6 @@ class HTTPAdapter(Platform):
             if request.method == 'OPTIONS':
                 return '', HTTP_STATUS_CODE["OK"]
             return await self._handle_http_stream_message(request)
-
-        # WebSocket 接口
-        if self.enable_websocket:
-            @self.app.websocket(f'{self.api_prefix}/ws')
-            async def websocket_endpoint():
-                """WebSocket 连接端点"""
-                await self._handle_websocket_connection()
 
         # 会话管理接口
         @self.app.route(f'{self.api_prefix}/sessions', methods=['GET', 'OPTIONS'])
@@ -495,73 +486,6 @@ class HTTPAdapter(Platform):
             logger.error(f"[HTTPAdapter] 处理流式请求时出错: {e}", exc_info=True)
             return jsonify({"error": f"内部服务器错误: {str(e)}"}), HTTP_STATUS_CODE["INTERNAL_ERROR"]
 
-    async def _handle_websocket_connection(self):
-        """处理 WebSocket 连接"""
-        ws = quart_ws
-
-        # 获取客户端信息
-        client_ip = ws.remote_addr
-        user_agent = ws.headers.get('User-Agent')
-
-        # 鉴权
-        if self.auth_token:
-            token = ws.args.get('token') or ws.headers.get('Authorization', '').replace('Bearer ', '')
-            if token != self.auth_token:
-                await ws.close(WS_CLOSE_CODE["POLICY_VIOLATION"], "未授权访问")
-                return
-
-        session_id = str(uuid.uuid4())
-
-        # 创建会话
-        session = HTTPSession(
-            session_id=session_id,
-            websocket=ws,
-            adapter=self,
-            client_ip=client_ip,
-            user_agent=user_agent
-        )
-
-        # 检查会话数量限制
-        if len(self.sessions) >= self.max_sessions:
-            oldest_session_id = min(self.sessions.keys(), key=lambda k: self.sessions[k].last_active)
-            oldest_session = self.sessions.pop(oldest_session_id)
-            await oldest_session.close("会话数量超限，关闭最旧会话")
-
-        self.sessions[session_id] = session
-
-        logger.info(f"[HTTPAdapter] WebSocket 连接建立: {session_id}, IP: {client_ip}")
-
-        try:
-            # 发送连接成功消息
-            await ws.send(json.dumps({
-                "type": HTTP_MESSAGE_TYPE["CONNECTED"],
-                "session_id": session_id,
-                "timestamp": time.time()
-            }))
-
-            # 处理消息
-            while True:
-                data = await ws.receive()
-                if data is None:
-                    break
-
-                try:
-                    message_data = json.loads(data)
-                    await session.handle_message(message_data)
-                except json.JSONDecodeError:
-                    await session.send_error("无效的 JSON 数据")
-                except Exception as e:
-                    logger.error(f"[HTTPAdapter] 处理WebSocket消息时出错: {e}")
-                    await session.send_error(f"处理消息时出错: {str(e)}")
-
-        except Exception as e:
-            if "1000" not in str(e) and "1001" not in str(e):  # 忽略正常关闭
-                logger.error(f"[HTTPAdapter] WebSocket连接错误: {e}")
-        finally:
-            if session_id in self.sessions:
-                del self.sessions[session_id]
-            logger.info(f"[HTTPAdapter] WebSocket连接关闭: {session_id}")
-
     async def _handle_list_sessions(self, request_obj) -> Any:
         """处理获取会话列表请求"""
         # 鉴权
@@ -693,7 +617,6 @@ class HTTPAdapter(Platform):
 
         logger.info(f"[HTTPAdapter] 启动 HTTP 服务器在 {self.http_host}:{self.http_port}")
         logger.info(f"[HTTPAdapter] API 前缀: {self.api_prefix}")
-        logger.info(f"[HTTPAdapter] WebSocket: {'启用' if self.enable_websocket else '禁用'}")
         logger.info(f"[HTTPAdapter] 鉴权: {'启用' if self.auth_token else '禁用'}")
         logger.info(f"[HTTPAdapter] CORS 来源: {self.cors_origins}")
 
@@ -791,14 +714,6 @@ class HTTPAdapter(Platform):
                 await self._cleanup_task
             except asyncio.CancelledError:
                 pass
-
-        # 关闭所有 WebSocket 会话
-        close_tasks = []
-        for session_id, session in list(self.sessions.items()):
-            close_tasks.append(session.close("适配器终止"))
-
-        if close_tasks:
-            await asyncio.gather(*close_tasks, return_exceptions=True)
 
         # 取消所有等待的响应
         for event_id, pending in list(self.pending_responses.items()):

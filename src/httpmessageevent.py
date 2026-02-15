@@ -1,7 +1,7 @@
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.event import MessageChain
 from .dataclasses import HTTPRequestData, PendingResponse, SessionStats, AdapterStats
-from .constants import HTTP_MESSAGE_TYPE, HTTP_EVENT_TYPE, HTTP_STATUS_CODE, WS_CLOSE_CODE
+from .constants import HTTP_MESSAGE_TYPE, HTTP_EVENT_TYPE, HTTP_STATUS_CODE
 from collections.abc import AsyncGenerator
 from astrbot import logger
 from .tool import BMC2Text
@@ -174,100 +174,3 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             "type": HTTP_MESSAGE_TYPE["END"],
             "data": {}
         })
-
-class WebSocketMessageEvent(HTTPMessageEvent):
-    """WebSocket 消息事件"""
-
-    def __init__(self, message_str, message_obj, platform_meta, session_id, adapter, websocket, event_id, request_data):
-        super().__init__(message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data)
-        self.websocket = websocket
-        self._message_buffer = []  # 新增：消息缓冲区
-        self._is_streaming = False  # 新增：是否正在流式传输
-        self._stream_complete = asyncio.Event()  # 新增：流式完成事件
-        self.set_extra("event_type", HTTP_EVENT_TYPE["WEBSOCKET"])
-        self.set_extra("websocket", True)
-
-    async def send(self, message_chain: MessageChain):
-        """发送响应到 WebSocket"""
-        response_text = str(message_chain)
-
-        # 如果正在流式传输，先发送流式结束
-        if self._is_streaming:
-            await self._end_streaming()
-
-        # 发送响应
-        await self.websocket.send(json.dumps({
-            "type": HTTP_MESSAGE_TYPE["RESPONSE"],
-            "event_id": self.event_id,
-            "message": response_text,
-            "timestamp": time.time()
-        }))
-
-        # 完成 future
-        if self.event_id in self._adapter.pending_responses:
-            pending = self._adapter.pending_responses.pop(self.event_id)
-            if not pending.future.done():
-                pending.future.set_result(response_text)
-
-    async def _end_streaming(self):
-        """结束当前的流式传输"""
-        if self._is_streaming:
-            self._is_streaming = False
-            self._stream_complete.set()
-
-    async def send_streaming(
-        self,
-        generator: AsyncGenerator[MessageChain, None],
-        use_fallback: bool = False,
-    ):
-        """WebSocket 流式发送"""
-        try:
-            self._is_streaming = True
-            self._stream_complete.clear()
-
-            async for message_chain in generator:
-                for message in message_chain.chain:
-                    response_text, text_type = BMC2Text(message)
-                    # 发送流式响应
-                    await self.websocket.send(json.dumps({
-                        "type": HTTP_MESSAGE_TYPE["STREAM"],
-                        "event_id": self.event_id,
-                        "chunk": response_text,
-                        "text_type": text_type,
-                        "timestamp": time.time()
-                    }))
-
-            # 发送结束事件
-            await self.websocket.send(json.dumps({
-                "type": HTTP_MESSAGE_TYPE["END"],
-                "event_id": self.event_id,
-                "timestamp": time.time()
-            }))
-
-            # 结束流式传输
-            await self._end_streaming()
-
-        except Exception as e:
-            logger.error(f"[WebSocketMessageEvent] 流式发送时出错: {e}")
-            # 发送错误消息
-            await self.websocket.send(json.dumps({
-                "type": HTTP_MESSAGE_TYPE["ERROR"],
-                "event_id": self.event_id,
-                "message": f"流式发送错误: {str(e)}",
-                "timestamp": time.time()
-            }))
-            # 即使出错也要结束流式传输
-            await self._end_streaming()
-            raise
-
-    def mark_conversation_end(self):
-        """标记整个对话结束（由外部调用）"""
-        # 结束任何正在进行的流式传输
-        asyncio.create_task(self._end_streaming())
-
-        # 发送最终结束事件
-        asyncio.create_task(self.websocket.send(json.dumps({
-            "type": HTTP_MESSAGE_TYPE["END"],
-            "event_id": self.event_id,
-            "timestamp": time.time()
-        })))
