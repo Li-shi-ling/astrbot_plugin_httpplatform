@@ -14,6 +14,8 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.core.config.default import CONFIG_METADATA_2
 from astrbot.api import logger
+from astrbot.api.platform import register_platform_adapter
+from src.http_adapter import HTTPAdapter
 
 
 # ==================== HTTP 适配器插件 ====================
@@ -106,8 +108,7 @@ class HTTPAdapterPlugin(Star):
                 version = astrbot.cli.__version__
             if not version:
                 logger.warning("[astrbook] 没有找到astrbot版本号,使用4.14.8前的metadata注册方案")
-                self._register_config()
-                from .src.http_adapter_414 import HTTPAdapter
+                self.register_414()
             else:
                 v1 = [int(x) for x in version.split('.')]
                 v2 = [int(x) for x in "4.16.0".split('.')]
@@ -115,9 +116,9 @@ class HTTPAdapterPlugin(Star):
                 v1 += [0] * (max_len - len(v1))
                 v2 += [0] * (max_len - len(v2))
                 if v1 >= v2:
-                    from .src.http_adapter_416 import HTTPAdapter
+                    self.register_416()
                 else:
-                    from .src.http_adapter_414 import HTTPAdapter
+                    self.register_414()
             self._http_adapter_cls = HTTPAdapter
             logger.info("[HTTPAdapter] HTTP 适配器导入成功")
         except ImportError as e:
@@ -190,3 +191,177 @@ class HTTPAdapterPlugin(Star):
                 else:
                     logger.debug("[HTTPAdapter] 存在没有名字的HTTPAdapter实例")
         yield event.plain_result("HTTPAdapter实例:\n" + "\n".join(list(self.httpadapter)))
+
+    def register_416(self):
+        register_platform_adapter(
+            "http_adapter",  # 适配器名称
+            "HTTP/HTTPS 适配器 - 提供外部 HTTP 接口访问 AstrBot",  # 描述
+            default_config_tmpl={
+                "http_host": "0.0.0.0",
+                "http_port": 8080,
+                "api_prefix": "/api/v1",
+                "enable_http_api": True,
+                "auth_token": "",
+                "cors_origins": "*",
+                "max_request_size": 10485760,  # 10MB
+                "request_timeout": 30,
+                "session_timeout": 3600,  # 会话超时时间(秒)
+                "max_sessions": 1000,  # 最大会话数
+            },
+            i18n_resources={
+                "zh-CN": {
+                    "http_host": {
+                        "description": "HTTP 监听主机",
+                        "hint": "HTTP 服务器监听的主机地址，0.0.0.0 表示所有网络接口",
+                    },
+                    "http_port": {
+                        "description": "HTTP 监听端口",
+                        "hint": "HTTP 服务器监听的端口号",
+                    },
+                    "api_prefix": {
+                        "description": "API 路径前缀",
+                        "hint": "所有 API 接口的 URL 前缀",
+                    },
+                    "enable_http_api": {
+                        "description": "启用 HTTP API",
+                        "hint": "是否启动 HTTP API 服务",
+                    },
+                    "auth_token": {
+                        "description": "认证令牌",
+                        "hint": "API 访问认证令牌，留空表示不启用认证",
+                    },
+                    "cors_origins": {
+                        "description": "CORS 允许的源",
+                        "hint": "跨域请求允许的来源，多个用逗号分隔，* 表示全部允许",
+                    },
+                    "max_request_size": {
+                        "description": "最大请求大小 (bytes)",
+                        "hint": "允许的最大请求体大小，单位字节",
+                    },
+                    "request_timeout": {
+                        "description": "请求超时时间 (s)",
+                        "hint": "HTTP 请求处理超时时间，单位秒",
+                    },
+                    "session_timeout": {
+                        "description": "会话超时时间 (s)",
+                        "hint": "会话保持的最长时间，超过此时间未活动的会话将被清理",
+                    },
+                    "max_sessions": {
+                        "description": "最大会话数",
+                        "hint": "同时保持的最大会话数量",
+                    },
+                },
+                "en-US": {
+                    "http_host": {
+                        "description": "HTTP listen host",
+                        "hint": "HTTP server listen host, 0.0.0.0 for all interfaces",
+                    },
+                    "http_port": {
+                        "description": "HTTP listen port",
+                        "hint": "HTTP server listen port",
+                    },
+                    "api_prefix": {
+                        "description": "API path prefix",
+                        "hint": "URL prefix for all API endpoints",
+                    },
+                    "enable_http_api": {
+                        "description": "Enable HTTP API",
+                        "hint": "Whether to start the HTTP API service",
+                    },
+                    "auth_token": {
+                        "description": "Auth token",
+                        "hint": "API access authentication token, leave empty to disable",
+                    },
+                    "cors_origins": {
+                        "description": "CORS allowed origins",
+                        "hint": "Allowed origins for CORS, comma separated, * for all",
+                    },
+                    "max_request_size": {
+                        "description": "Max request size (bytes)",
+                        "hint": "Maximum allowed request body size in bytes",
+                    },
+                    "request_timeout": {
+                        "description": "Request timeout (s)",
+                        "hint": "HTTP request processing timeout in seconds",
+                    },
+                    "session_timeout": {
+                        "description": "Session timeout (s)",
+                        "hint": "Maximum session idle time before cleanup",
+                    },
+                    "max_sessions": {
+                        "description": "Max sessions",
+                        "hint": "Maximum number of concurrent sessions",
+                    },
+                },
+            },
+            config_metadata={
+                "http_host": {
+                    "description": "HTTP 监听主机",
+                    "type": "string",
+                    "hint": "HTTP 服务器监听的主机地址，0.0.0.0 表示所有网络接口",
+                },
+                "http_port": {
+                    "description": "HTTP 监听端口",
+                    "type": "int",
+                    "hint": "HTTP 服务器监听的端口号",
+                },
+                "api_prefix": {
+                    "description": "API 路径前缀",
+                    "type": "string",
+                    "hint": "所有 API 接口的 URL 前缀",
+                },
+                "enable_http_api": {
+                    "description": "启用 HTTP API",
+                    "type": "bool",
+                    "hint": "是否启动 HTTP API 服务",
+                },
+                "auth_token": {
+                    "description": "认证令牌",
+                    "type": "string",
+                    "hint": "API 访问认证令牌，留空表示不启用认证",
+                },
+                "cors_origins": {
+                    "description": "CORS 允许的源",
+                    "type": "string",
+                    "hint": "跨域请求允许的来源，多个用逗号分隔，* 表示全部允许",
+                },
+                "max_request_size": {
+                    "description": "最大请求大小 (bytes)",
+                    "type": "int",
+                    "hint": "允许的最大请求体大小，单位字节",
+                },
+                "request_timeout": {
+                    "description": "请求超时时间 (s)",
+                    "type": "int",
+                    "hint": "HTTP 请求处理超时时间，单位秒",
+                },
+                "session_timeout": {
+                    "description": "会话超时时间 (s)",
+                    "type": "int",
+                    "hint": "会话保持的最长时间，超过此时间未活动的会话将被清理",
+                },
+                "max_sessions": {
+                    "description": "最大会话数",
+                    "type": "int",
+                    "hint": "同时保持的最大会话数量",
+                },
+            },
+        )(HTTPAdapter)
+
+    def register_414(self):
+        register_platform_adapter(
+            "http_adapter",  # 适配器名称
+            "HTTP/HTTPS 适配器 - 提供外部 HTTP 接口访问 AstrBot",  # 描述
+            default_config_tmpl={
+                "http_host": "0.0.0.0",
+                "http_port": 8080,
+                "api_prefix": "/api/v1",
+                "enable_http_api": True,
+                "auth_token": "",
+                "cors_origins": "*",
+                "max_request_size": 10485760,  # 10MB
+                "request_timeout": 30,
+                "session_timeout": 3600,  # 会话超时时间(秒)
+                "max_sessions": 1000,  # 最大会话数
+            }
+        )(HTTPAdapter)
