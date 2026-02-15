@@ -33,6 +33,7 @@ from .constants import HTTP_MESSAGE_TYPE, HTTP_EVENT_TYPE, HTTP_STATUS_CODE, WS_
 from .dataclasses import HTTPRequestData, PendingResponse, SessionStats, AdapterStats
 from .httpmessageevent import StandardHTTPMessageEvent, WebSocketMessageEvent, HTTPMessageEvent, StreamHTTPMessageEvent
 from .httpsession import HTTPSession
+from .tool import Json2BMCChain
 
 # ==================== HTTP 适配器主类 ====================
 @register_platform_adapter(
@@ -230,19 +231,20 @@ class HTTPAdapter(Platform):
                 remote_addr=request_obj.remote_addr,
                 user_agent=request_obj.user_agent.string if request_obj.user_agent else None,
                 content_type=request_obj.content_type,
-                accept=request_obj.headers.get('Accept'),
-                data=data  # 这里传入请求体数据
+                accept=request_obj.headers.get('Accept')
             )
 
             # 必需参数检查
-            message = data.get('message')
+            message = data.get('message', None)
             if not message:
                 return jsonify({"error": "message 参数是必需的"}), HTTP_STATUS_CODE["BAD_REQUEST"]
-
+            messages = None
+            if isinstance(message, List):
+                messages = Json2BMCChain(message)
             # 获取会话ID或创建新的
             platform = data.get('platform', "")
             user_id = data.get('user_id', '0')
-            username = data.get('username', '外部用户')
+            nickname = data.get('nickname', '外部用户')
             session_id = f"{platform}_{user_id}"
 
             # 创建事件并提交
@@ -259,12 +261,15 @@ class HTTPAdapter(Platform):
             abm.self_id = str(self._metadata.id)
             abm.sender = MessageMember(
                 user_id=str(user_id),
-                nickname=username,
+                nickname=nickname,
             )
             abm.type = MessageType.GROUP_MESSAGE
             abm.session_id = session_id
             abm.message_id = data.get('message_id', str(uuid.uuid4().hex))
-            abm.message = [Plain(text=message)]
+            if messages is None:
+                abm.message = [Plain(text=message)]
+            else:
+                abm.message = messages
             abm.message_str = message
             abm.raw_message = data
             abm.timestamp = int(time.time())
@@ -281,7 +286,7 @@ class HTTPAdapter(Platform):
             )
 
             # 设置额外信息
-            event.set_extra("original_data", data)
+            event.set_extra("data", data)
 
             event.is_wake = True
             event.is_at_or_wake_command = True
@@ -343,7 +348,9 @@ class HTTPAdapter(Platform):
             message = data.get('message')
             if not message:
                 return jsonify({"error": "message 参数是必需的"}), HTTP_STATUS_CODE["BAD_REQUEST"]
-
+            messages = []
+            if isinstance(message, List):
+                messages = Json2BMCChain(message)
             # 收集请求头信息
             headers = dict(request_obj.headers)
             request_data = HTTPRequestData(
@@ -353,8 +360,7 @@ class HTTPAdapter(Platform):
                 remote_addr=request_obj.remote_addr,
                 user_agent=request_obj.user_agent.string if request_obj.user_agent else None,
                 content_type=request_obj.content_type,
-                accept=request_obj.headers.get('Accept'),
-                data=data
+                accept=request_obj.headers.get('Accept')
             )
 
             platform = data.get('platform', "")
@@ -377,7 +383,10 @@ class HTTPAdapter(Platform):
                 abm.type = MessageType.GROUP_MESSAGE
                 abm.session_id = session_id
                 abm.message_id = str(uuid.uuid4().hex)
-                abm.message = [Plain(text=message)]
+                if messages is None:
+                    abm.message = [Plain(text=message)]
+                else:
+                    abm.message = messages
                 abm.message_str = message
                 abm.raw_message = data
                 abm.timestamp = int(time.time())

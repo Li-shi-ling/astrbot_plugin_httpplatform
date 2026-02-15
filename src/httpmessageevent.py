@@ -43,7 +43,6 @@ class HTTPMessageEvent(AstrMessageEvent):
         self.set_extra("content_type", request_data.content_type)
         self.set_extra("accept", request_data.accept)
         self.set_extra("request_timestamp", request_data.timestamp)
-        self.set_extra("data",request_data.data)
 
     @property
     def adapter(self):
