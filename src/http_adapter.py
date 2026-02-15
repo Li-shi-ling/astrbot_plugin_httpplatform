@@ -759,6 +759,7 @@ class HTTPAdapter(Platform):
         logger.info(f"[HTTPAdapter] CORS 来源: {self.cors_origins}")
 
         self._running = True
+        server_task = None
 
         # 启动清理任务
         self._cleanup_task = asyncio.create_task(self._cleanup_loop())
@@ -772,6 +773,8 @@ class HTTPAdapter(Platform):
             config = Config()
             config.bind = [f"{self.http_host}:{self.http_port}"]
             config.use_reloader = False
+            # 禁用 Hypercorn 的信号处理，让我们自己处理
+            config.signal_handlers = False
 
             # 使用任务包装服务器启动，以便能够响应信号
             server_task = asyncio.create_task(hypercorn.asyncio.serve(self.app, config))
@@ -784,7 +787,7 @@ class HTTPAdapter(Platform):
             logger.info("[HTTPAdapter] 收到退出信号，正在停止服务器...")
             self._running = False
             # 取消服务器任务
-            if 'server_task' in locals():
+            if server_task:
                 server_task.cancel()
                 try:
                     await server_task
@@ -801,7 +804,7 @@ class HTTPAdapter(Platform):
                 except asyncio.CancelledError:
                     pass
             # 确保服务器任务被取消
-            if 'server_task' in locals():
+            if server_task:
                 server_task.cancel()
                 try:
                     await server_task
