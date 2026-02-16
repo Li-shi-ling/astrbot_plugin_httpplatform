@@ -698,6 +698,6 @@ class HTTPAdapter(Platform):
 
         self.sessions.clear()
         self.pending_responses.clear()
-
-        logger.info("[HTTPAdapter] 适配器已终止")
         await super().terminate()
+        logger.info("[HTTPAdapter] 适配器已终止")
+
