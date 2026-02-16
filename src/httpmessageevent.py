@@ -117,6 +117,12 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         else:
             logger.warning(f"[StandardHTTPMessageEvent] 没有找到待处理响应: event_id={self.event_id}")
 
+    async def _pre_send(self):
+        logger.debug("[StandardHTTPMessageEvent] 调用_pre_send")
+
+    async def _post_send(self):
+        logger.debug("[StandardHTTPMessageEvent] 调用_post_send")
+
     async def send_streaming(
             self,
             generator: AsyncGenerator[MessageChain, None],
@@ -235,3 +241,9 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             self._stream_complete.set()
 
             raise
+
+    async def _pre_send(self):
+        logger.debug("[StreamHTTPMessageEvent] 调用_pre_send")
+
+    async def _post_send(self):
+        logger.debug("[StreamHTTPMessageEvent] 调用_post_send")
