@@ -113,8 +113,7 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
             result_json = json.dumps(full_response, ensure_ascii=False)
             pending.future.set_result(result_json)
 
-            logger.debug(
-                f"[StandardHTTPMessageEvent] 已发送响应 (event_id: {self.event_id}, 消息数: {len(full_response)})")
+            logger.debug(f"[StandardHTTPMessageEvent] 已发送响应 (event_id: {self.event_id}, 消息数: {len(full_response)})")
         else:
             logger.warning(f"[StandardHTTPMessageEvent] 没有找到待处理响应: event_id={self.event_id}")
 
@@ -144,14 +143,6 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         await self.send(merged_chain)
 
         return None
-
-    def stop_event(self) -> None:
-        """终止事件传播。"""
-        if self._result is None:
-            self.set_result(MessageEventResult().stop_event())
-        else:
-            self._result.stop_event()
-        logger.debug("[HTTPAdapter] 调用stop_event")
 
 class StreamHTTPMessageEvent(HTTPMessageEvent):
     """流式 HTTP 消息事件
@@ -244,11 +235,3 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             self._stream_complete.set()
 
             raise
-
-    def stop_event(self) -> None:
-        """终止事件传播。"""
-        if self._result is None:
-            self.set_result(MessageEventResult().stop_event())
-        else:
-            self._result.stop_event()
-        logger.debug("[HTTPAdapter] 调用stop_event")
