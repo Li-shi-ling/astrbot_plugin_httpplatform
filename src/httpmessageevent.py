@@ -5,6 +5,7 @@ from astrbot import logger
 from .dataclasses import HTTPRequestData
 from .constants import HTTP_MESSAGE_TYPE, HTTP_EVENT_TYPE
 from .tool import BMC2Text
+from astrbot.core.message.message_event_result import MessageEventResult
 
 from collections.abc import AsyncGenerator
 import asyncio
@@ -144,6 +145,14 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
 
         return None
 
+    def stop_event(self) -> None:
+        """终止事件传播。"""
+        if self._result is None:
+            self.set_result(MessageEventResult().stop_event())
+        else:
+            self._result.stop_event()
+        logger.debug("[HTTPAdapter] 调用stop_event")
+
 class StreamHTTPMessageEvent(HTTPMessageEvent):
     """流式 HTTP 消息事件
     特点：send方法不处理（保持不动），send_streaming方法流式发送消息
@@ -235,3 +244,11 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             self._stream_complete.set()
 
             raise
+
+    def stop_event(self) -> None:
+        """终止事件传播。"""
+        if self._result is None:
+            self.set_result(MessageEventResult().stop_event())
+        else:
+            self._result.stop_event()
+        logger.debug("[HTTPAdapter] 调用stop_event")
