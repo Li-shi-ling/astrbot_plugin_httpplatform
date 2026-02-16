@@ -50,7 +50,7 @@ class HTTPAdapterPlugin(Star):
             "hint": "API 接口的路径前缀，默认 /api/v1",
             "default": "/api/v1"
         },
-        
+
         "enable_http_api": {
             "description": "启用 HTTP API",
             "type": "bool",
@@ -383,4 +383,10 @@ class HTTPAdapterPlugin(Star):
             await event.send_end_signal()
             logger.debug(f"[on_llm_response] StreamHTTPMessageEvent 已发送结束信号 (event_id: {event.event_id})")
 
-
+    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE, priority=-999999)
+    async def other_message(self, event: AstrMessageEvent):
+        if event._has_send_oper:
+            if isinstance(event, StandardHTTPMessageEvent):
+                await event.send_response()
+            elif isinstance(event, StreamHTTPMessageEvent):
+                await event.send_end_signal()
