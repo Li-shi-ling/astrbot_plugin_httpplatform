@@ -117,13 +117,6 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         else:
             logger.warning(f"[StandardHTTPMessageEvent] 没有找到待处理响应: event_id={self.event_id}")
 
-
-        tool_loop_agent_runner = find_tool_loop_agent_runner_with_stack_info()
-        if not tool_loop_agent_runner:
-            logger.debug(f"[StreamHTTPMessageEvent] tool_loop_agent_runner.done(): {tool_loop_agent_runner.done()}")
-        else:
-            logger.debug("[StreamHTTPMessageEvent] tool_loop_agent_runner没找到")
-
     async def _pre_send(self):
         logger.debug("[StandardHTTPMessageEvent] 调用_pre_send")
 
@@ -183,12 +176,6 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
                 "data": {"chunk": response_text},
                 "text_type": text_type
             })
-
-        tool_loop_agent_runner = find_tool_loop_agent_runner_with_stack_info()
-        if not tool_loop_agent_runner:
-            logger.debug(f"[StreamHTTPMessageEvent] tool_loop_agent_runner.done(): {tool_loop_agent_runner.done()}")
-        else:
-            logger.debug("[StreamHTTPMessageEvent] tool_loop_agent_runner没找到")
 
     async def _end_streaming(self):
         """结束当前的流式传输"""

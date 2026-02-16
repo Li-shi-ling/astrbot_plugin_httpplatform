@@ -59,7 +59,6 @@ ComponentTypes = {
     "WechatEmoji": WechatEmoji,
 }
 
-
 def BMC2Text(data: BaseMessageComponent) -> tuple[str, str]:
     """
     将 BaseMessageComponent 对象转换为 JSON 字符串和类型字符串
