@@ -4,7 +4,7 @@ from astrbot import logger
 
 from .dataclasses import HTTPRequestData
 from .constants import HTTP_MESSAGE_TYPE, HTTP_EVENT_TYPE
-from .tool import BMC2Text
+from .tool import BMC2Text, find_tool_loop_agent_runner_with_stack_info
 from astrbot.core.message.message_event_result import MessageEventResult
 
 from collections.abc import AsyncGenerator
@@ -117,6 +117,13 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         else:
             logger.warning(f"[StandardHTTPMessageEvent] 没有找到待处理响应: event_id={self.event_id}")
 
+
+        tool_loop_agent_runner = find_tool_loop_agent_runner_with_stack_info()
+        if not tool_loop_agent_runner:
+            logger.debug(f"[StreamHTTPMessageEvent] tool_loop_agent_runner.done(): {tool_loop_agent_runner.done()}")
+        else:
+            logger.debug("[StreamHTTPMessageEvent] tool_loop_agent_runner没找到")
+
     async def _pre_send(self):
         logger.debug("[StandardHTTPMessageEvent] 调用_pre_send")
 
@@ -176,6 +183,12 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
                 "data": {"chunk": response_text},
                 "text_type": text_type
             })
+
+        tool_loop_agent_runner = find_tool_loop_agent_runner_with_stack_info()
+        if not tool_loop_agent_runner:
+            logger.debug(f"[StreamHTTPMessageEvent] tool_loop_agent_runner.done(): {tool_loop_agent_runner.done()}")
+        else:
+            logger.debug("[StreamHTTPMessageEvent] tool_loop_agent_runner没找到")
 
     async def _end_streaming(self):
         """结束当前的流式传输"""
@@ -241,9 +254,3 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             self._stream_complete.set()
 
             raise
-
-    async def _pre_send(self):
-        logger.debug("[StreamHTTPMessageEvent] 调用_pre_send")
-
-    async def _post_send(self):
-        logger.debug("[StreamHTTPMessageEvent] 调用_post_send")
