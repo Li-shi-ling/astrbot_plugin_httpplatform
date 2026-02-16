@@ -375,12 +375,12 @@ class HTTPAdapterPlugin(Star):
 
         # 处理标准HTTP消息事件 - 统一发送缓存的响应
         if isinstance(event, StandardHTTPMessageEvent):
-            await event.send_response()
+            event.setfinalcall()
             logger.debug(f"[on_llm_response] StandardHTTPMessageEvent 已发送响应 (event_id: {event.event_id})")
 
         # 处理流式HTTP消息事件 - 统一发送结束信号
         elif isinstance(event, StreamHTTPMessageEvent):
-            await event.send_end_signal()
+            event.setfinalcall()
             logger.debug(f"[on_llm_response] StreamHTTPMessageEvent 已发送结束信号 (event_id: {event.event_id})")
 
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE, priority=-999999)

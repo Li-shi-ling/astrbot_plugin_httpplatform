@@ -84,7 +84,7 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         super().__init__(message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data)
         self._pending_response = None  # 保存待处理响应
         self._cached_response = None  # 缓存完整的响应数据
-        self.set_extra("event_type", HTTP_EVENT_TYPE["STANDARD"])
+        self._finalcall = False
 
     async def send(self, message_chain: MessageChain):
         """
@@ -106,6 +106,10 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         # 缓存完整的响应数据
         self._cached_response = full_response
         logger.debug(f"[StandardHTTPMessageEvent] 已缓存响应数据 (event_id: {self.event_id}, 消息数: {len(full_response)})")
+
+        if self._finalcall:
+            await self.send_response()
+            self._finalcall = False
 
     async def send_streaming(
             self,
@@ -158,6 +162,9 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         else:
             logger.warning(f"[StandardHTTPMessageEvent] 没有找到待处理响应: event_id={self.event_id}")
 
+    def setfinalcall(self):
+        self._finalcall = True
+
 class StreamHTTPMessageEvent(HTTPMessageEvent):
     """流式 HTTP 消息事件
     特点：send方法不处理（保持不动），send_streaming方法流式发送消息（不发送结束信号）
@@ -166,10 +173,10 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
     def __init__(self, message_str, message_obj, platform_meta, session_id, adapter, queue, event_id, request_data):
         super().__init__(message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data)
         self.queue = queue
-        self._is_streaming = False  # 标记是否正在流式传输
-        self._stream_complete = asyncio.Event()  # 流式完成事件
-        self.set_extra("event_type", HTTP_EVENT_TYPE["STREAMING"])
+        self._is_streaming = False
+        self._stream_complete = asyncio.Event()
         self.set_extra("streaming", True)
+        self._finalcall = False
 
     async def send(self, message_chain: MessageChain):
         """发送完整响应 - 用于非流式输出"""
@@ -185,6 +192,10 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
                 "data": {"content": response_text},
                 "text_type": text_type
             })
+
+        if self._finalcall:
+            await self.send_end_signal()
+            self._finalcall = False
 
     async def _end_streaming(self):
         """结束当前的流式传输（内部使用，不对外发送结束信号）"""
@@ -240,6 +251,10 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
 
             raise
 
+        if self._finalcall:
+            await self.send_end_signal()
+            self._finalcall = False
+
     async def send_end_signal(self):
         """
         发送流式结束信号 - 专门用于在 on_llm_response 中调用
@@ -259,3 +274,6 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             "data": {}
         })
         logger.debug(f"[StreamHTTPMessageEvent] 已发送结束信号 (event_id: {self.event_id})")
+
+    def setfinalcall(self):
+        self._finalcall = True
