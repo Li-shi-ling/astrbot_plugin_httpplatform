@@ -15,7 +15,9 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.core.config.default import CONFIG_METADATA_2
 from astrbot.api import logger
 from astrbot.api.platform import register_platform_adapter
+from astrbot.api.provider import ProviderRequest, LLMResponse
 from .src.http_adapter import HTTPAdapter
+from .src.httpmessageevent import StandardHTTPMessageEvent, StreamHTTPMessageEvent
 
 # ==================== HTTP 适配器插件 ====================
 class HTTPAdapterPlugin(Star):
@@ -169,27 +171,6 @@ class HTTPAdapterPlugin(Star):
         """终止插件"""
         self._unregister_config()
         logger.info("[HTTPAdapter] HTTP 适配器插件终止")
-
-    @filter.command_group("http")
-    async def http(self):
-        pass
-
-    @http.command("ghp")
-    async def inithttpadapter(self, event: AstrMessageEvent):
-        """获取所有HTTPAdapter实例到内存"""
-        self.httpadapter = {}
-        for platform in self.context.platform_manager.platform_insts:
-            if isinstance(platform, self._http_adapter_cls):
-                meta = platform.meta()
-                if hasattr(meta, 'id'):
-                    platform_id = meta.id
-                else:
-                    platform_id = None
-                if platform_id:
-                    self.httpadapter[platform_id] = platform
-                else:
-                    logger.debug("[HTTPAdapter] 存在没有名字的HTTPAdapter实例")
-        yield event.plain_result("HTTPAdapter实例:\n" + "\n".join(list(self.httpadapter)))
 
     def register_416(self):
         register_platform_adapter(
@@ -364,3 +345,42 @@ class HTTPAdapterPlugin(Star):
                 "max_sessions": 1000,  # 最大会话数
             }
         )(HTTPAdapter)
+
+    @filter.command_group("http")
+    async def http(self):
+        pass
+
+    @http.command("ghp")
+    async def inithttpadapter(self, event: AstrMessageEvent):
+        """获取所有HTTPAdapter实例到内存"""
+        self.httpadapter = {}
+        for platform in self.context.platform_manager.platform_insts:
+            if isinstance(platform, self._http_adapter_cls):
+                meta = platform.meta()
+                if hasattr(meta, 'id'):
+                    platform_id = meta.id
+                else:
+                    platform_id = None
+                if platform_id:
+                    self.httpadapter[platform_id] = platform
+                else:
+                    logger.debug("[HTTPAdapter] 存在没有名字的HTTPAdapter实例")
+        yield event.plain_result("HTTPAdapter实例:\n" + "\n".join(list(self.httpadapter)))
+
+    @filter.on_llm_response()
+    async def on_llm_response(self, event: AstrMessageEvent, req: LLMResponse):
+        """在LLM响应后处理消息的结束"""
+        if not req.role == "assistant":
+            return
+
+        # 处理标准HTTP消息事件 - 统一发送缓存的响应
+        if isinstance(event, StandardHTTPMessageEvent):
+            await event.send_response()
+            logger.debug(f"[on_llm_response] StandardHTTPMessageEvent 已发送响应 (event_id: {event.event_id})")
+
+        # 处理流式HTTP消息事件 - 统一发送结束信号
+        elif isinstance(event, StreamHTTPMessageEvent):
+            await event.send_end_signal()
+            logger.debug(f"[on_llm_response] StreamHTTPMessageEvent 已发送结束信号 (event_id: {event.event_id})")
+
+

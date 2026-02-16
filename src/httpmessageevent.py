@@ -77,16 +77,18 @@ class HTTPMessageEvent(AstrMessageEvent):
 
 class StandardHTTPMessageEvent(HTTPMessageEvent):
     """标准 HTTP 消息事件
-    特点：send方法直接处理完所有消息链条后发出去，send_streaming方法获取完所有数据后一并发出去
+    特点：send方法只缓存数据，不立即返回响应；由 on_llm_response 统一输出
     """
 
     def __init__(self, message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data):
         super().__init__(message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data)
         self._pending_response = None  # 保存待处理响应
+        self._cached_response = None  # 缓存完整的响应数据
+        self.set_extra("event_type", HTTP_EVENT_TYPE["STANDARD"])
 
     async def send(self, message_chain: MessageChain):
         """
-        直接处理完整个消息链，立即返回响应
+        缓存消息链数据，不立即发送响应
         """
         # 处理消息链
         full_response = []
@@ -95,33 +97,15 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
             full_response.append({
                 "content": response_text,
                 "type": text_type
-            })
+        })
 
         # 如果没有消息，返回空数组
         if not full_response:
             full_response = []
 
-        # 获取待处理响应
-        pending = None
-        if self.event_id in self._adapter.pending_responses:
-            pending = self._adapter.pending_responses.pop(self.event_id)
-        elif self._pending_response:
-            pending = self._pending_response
-
-        # 设置响应结果
-        if pending and not pending.future.done():
-            result_json = json.dumps(full_response, ensure_ascii=False)
-            pending.future.set_result(result_json)
-
-            logger.debug(f"[StandardHTTPMessageEvent] 已发送响应 (event_id: {self.event_id}, 消息数: {len(full_response)})")
-        else:
-            logger.warning(f"[StandardHTTPMessageEvent] 没有找到待处理响应: event_id={self.event_id}")
-
-    async def _pre_send(self):
-        logger.debug("[StandardHTTPMessageEvent] 调用_pre_send")
-
-    async def _post_send(self):
-        logger.debug("[StandardHTTPMessageEvent] 调用_post_send")
+        # 缓存完整的响应数据
+        self._cached_response = full_response
+        logger.debug(f"[StandardHTTPMessageEvent] 已缓存响应数据 (event_id: {self.event_id}, 消息数: {len(full_response)})")
 
     async def send_streaming(
             self,
@@ -129,7 +113,7 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
             use_fallback: bool = False,
     ):
         """
-        获取完所有流式数据后，一次性发送
+        获取完所有流式数据后，一次性缓存
         """
         # 收集所有流式数据
         collected_chains = []
@@ -145,14 +129,38 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         for chain in collected_chains:
             merged_chain.chain.extend(chain.chain)
 
-        # 一次性发送合并后的消息
+        # 一次性缓存合并后的消息
         await self.send(merged_chain)
 
         return None
 
+    async def send_response(self):
+        """
+        发送缓存的响应 - 专门用于在 on_llm_response 中调用
+        """
+        # 如果没有缓存数据，发送空响应
+        if self._cached_response is None:
+            self._cached_response = []
+
+        # 获取待处理响应
+        pending = None
+        if self.event_id in self._adapter.pending_responses:
+            pending = self._adapter.pending_responses.pop(self.event_id)
+        elif self._pending_response:
+            pending = self._pending_response
+
+        # 设置响应结果
+        if pending and not pending.future.done():
+            result_json = json.dumps(self._cached_response, ensure_ascii=False)
+            pending.future.set_result(result_json)
+
+            logger.debug(f"[StandardHTTPMessageEvent] 已发送响应 (event_id: {self.event_id}, 消息数: {len(self._cached_response)})")
+        else:
+            logger.warning(f"[StandardHTTPMessageEvent] 没有找到待处理响应: event_id={self.event_id}")
+
 class StreamHTTPMessageEvent(HTTPMessageEvent):
     """流式 HTTP 消息事件
-    特点：send方法不处理（保持不动），send_streaming方法流式发送消息
+    特点：send方法不处理（保持不动），send_streaming方法流式发送消息（不发送结束信号）
     """
 
     def __init__(self, message_str, message_obj, platform_meta, session_id, adapter, queue, event_id, request_data):
@@ -164,21 +172,22 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
         self.set_extra("streaming", True)
 
     async def send(self, message_chain: MessageChain):
-        """发送完整响应 - 这是单条消息的结束"""
-        # 如果正在流式传输，先发送流式结束
+        """发送完整响应 - 用于非流式输出"""
+        # 如果正在流式传输，需要先结束流式
         if self._is_streaming:
             await self._end_streaming()
 
+        # 发送完整消息（这将发送多条消息，但不会发送结束信号）
         for message in message_chain.chain:
             response_text, text_type = BMC2Text(message)
             await self.queue.put({
-                "type": HTTP_MESSAGE_TYPE["STREAM"],
-                "data": {"chunk": response_text},
+                "type": HTTP_MESSAGE_TYPE["MESSAGE"],
+                "data": {"content": response_text},
                 "text_type": text_type
             })
 
     async def _end_streaming(self):
-        """结束当前的流式传输"""
+        """结束当前的流式传输（内部使用，不对外发送结束信号）"""
         if self._is_streaming:
             self._is_streaming = False
             self._stream_complete.set()
@@ -192,7 +201,7 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
         流式发送消息到客户端
 
         这个方法会实时地将生成器产生的每个消息块发送给客户端，
-        保持流式传输的特性
+        保持流式传输的特性。**不发送结束信号**，结束信号由 on_llm_response 统一处理。
         """
         try:
             # 标记开始流式传输
@@ -209,29 +218,18 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
                         "text_type": text_type
                     })
 
-            # 发送流式结束标记
-            await self.queue.put({
-                "type": HTTP_MESSAGE_TYPE["END"],
-                "data": {}
-            })
-
-            # 标记流式传输完成
+            # 注意：这里不再发送 END 信号，只标记内部完成
             self._is_streaming = False
             self._stream_complete.set()
 
         except Exception as e:
             logger.error(f"[StreamHTTPMessageEvent] 流式发送时出错: {e}")
 
-            # 发送错误信息
+            # 发送错误信息（错误时仍然需要通知客户端）
             try:
                 await self.queue.put({
                     "type": HTTP_MESSAGE_TYPE["ERROR"],
                     "data": {"error": str(e)}
-                })
-                # 即使出错也要发送 END
-                await self.queue.put({
-                    "type": HTTP_MESSAGE_TYPE["END"],
-                    "data": {"error": True}
                 })
             except Exception as queue_error:
                 logger.error(f"[StreamHTTPMessageEvent] 发送错误信息时失败: {queue_error}")
@@ -241,3 +239,23 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             self._stream_complete.set()
 
             raise
+
+    async def send_end_signal(self):
+        """
+        发送流式结束信号 - 专门用于在 on_llm_response 中调用
+        """
+        # 确保流式传输已经完成
+        if self._is_streaming:
+            # 等待流式传输完成（但最多等待5秒）
+            try:
+                await asyncio.wait_for(self._stream_complete.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning(f"[StreamHTTPMessageEvent] 等待流式完成超时 (event_id: {self.event_id})")
+                self._is_streaming = False
+
+        # 发送结束信号
+        await self.queue.put({
+            "type": HTTP_MESSAGE_TYPE["END"],
+            "data": {}
+        })
+        logger.debug(f"[StreamHTTPMessageEvent] 已发送结束信号 (event_id: {self.event_id})")
