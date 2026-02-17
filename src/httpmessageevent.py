@@ -94,6 +94,9 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         full_response = []
         for message in message_chain.chain:
             response_text, text_type = BMC2Text(message)
+            if "AstrBot 请求失败。" in response_text:
+                self._finalcall = True
+                break
             full_response.append({
                 "content": response_text,
                 "type": text_type
@@ -187,6 +190,9 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
         # 发送完整消息（这将发送多条消息，但不会发送结束信号）
         for message in message_chain.chain:
             response_text, text_type = BMC2Text(message)
+            if "AstrBot 请求失败。" in response_text:
+                self._finalcall = True
+                break
             await self.queue.put({
                 "type": HTTP_MESSAGE_TYPE["MESSAGE"],
                 "data": {"content": response_text},
@@ -196,12 +202,6 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
         if self._finalcall:
             await self.send_end_signal()
             self._finalcall = False
-
-    async def _end_streaming(self):
-        """结束当前的流式传输（内部使用，不对外发送结束信号）"""
-        if self._is_streaming:
-            self._is_streaming = False
-            self._stream_complete.set()
 
     async def send_streaming(
             self,
@@ -220,14 +220,7 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             self._stream_complete.clear()
 
             # 流式发送每个消息块
-            async for message_chain in generator:
-                for message in message_chain.chain:
-                    response_text, text_type = BMC2Text(message)
-                    await self.queue.put({
-                        "type": HTTP_MESSAGE_TYPE["STREAM"],
-                        "data": {"chunk": response_text},
-                        "text_type": text_type
-                    })
+            self._finalcall = await self.queue_put_generator(generator)
 
             # 注意：这里不再发送 END 信号，只标记内部完成
             self._is_streaming = False
@@ -255,6 +248,12 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             await self.send_end_signal()
             self._finalcall = False
 
+    async def _end_streaming(self):
+        """结束当前的流式传输（内部使用，不对外发送结束信号）"""
+        if self._is_streaming:
+            self._is_streaming = False
+            self._stream_complete.set()
+
     async def send_end_signal(self):
         """
         发送流式结束信号 - 专门用于在 on_llm_response 中调用
@@ -277,3 +276,17 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
 
     def setfinalcall(self):
         self._finalcall = True
+
+    async def queue_put_generator(self, generator: AsyncGenerator[MessageChain, None]):
+        async for message_chain in generator:
+            for message in message_chain.chain:
+                response_text, text_type = BMC2Text(message)
+                if "AstrBot 请求失败。" in response_text:
+                    self._finalcall = True
+                    return True
+                await self.queue.put({
+                    "type": HTTP_MESSAGE_TYPE["STREAM"],
+                    "data": {"chunk": response_text},
+                    "text_type": text_type
+                })
+        return False
