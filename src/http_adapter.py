@@ -107,6 +107,9 @@ class HTTPAdapter(Platform):
         )
 
         self._background_tasks = set() # 用于追踪任务
+        
+        # 中断信号
+        self.shutdown_event = asyncio.Event()
 
     def _start_task(self, coro: Coroutine):
         """统一管理后台任务，防止销毁报错"""
@@ -621,24 +624,9 @@ class HTTPAdapter(Platform):
             config.use_reloader = False
             # 禁用 Hypercorn 的信号处理，让我们自己处理
             config.signal_handlers = False
-
-            # 使用任务包装服务器启动，以便能够响应信号
-            server_task = asyncio.create_task(hypercorn.asyncio.serve(self.app, config))
             
-            # 等待服务器任务完成或被取消
-            await server_task
+            await hypercorn.asyncio.serve(self.app, config, shutdown_trigger=self.shutdown_event.wait)
 
-        except KeyboardInterrupt:
-            # 捕获 Ctrl+C 信号
-            logger.info("[HTTPAdapter] 收到退出信号，正在停止服务器...")
-            self._running = False
-            # 取消服务器任务
-            if server_task:
-                server_task.cancel()
-                try:
-                    await server_task
-                except asyncio.CancelledError:
-                    pass
         except Exception as e:
             logger.error(f"[HTTPAdapter] HTTP 服务器启动失败: {e}", exc_info=True)
             self._running = False
@@ -679,7 +667,8 @@ class HTTPAdapter(Platform):
         """终止适配器并清理所有挂起任务"""
         logger.info("[HTTPAdapter] 正在关闭，清理异步任务...")
         self._running = False
-
+        self.shutdown_event.set()
+        
         # 清理后台任务，防止 "Task was destroyed but it is pending"
         if self._background_tasks:
             for task in list(self._background_tasks):
@@ -701,7 +690,7 @@ class HTTPAdapter(Platform):
                 await self._cleanup_task
             except asyncio.CancelledError:
                 pass
-
+        
         # 取消所有等待的响应
         for event_id, pending in list(self.pending_responses.items()):
             if not pending.future.done():
@@ -709,5 +698,6 @@ class HTTPAdapter(Platform):
 
         self.sessions.clear()
         self.pending_responses.clear()
-
+        await super().terminate()
         logger.info("[HTTPAdapter] 适配器已终止")
+
