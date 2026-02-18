@@ -565,7 +565,7 @@ class HTTPAdapter(Platform):
 
         for session_id in expired_sessions:
             session = self.sessions.pop(session_id)
-            asyncio.create_task(session.close("会话超时自动清理"))
+            self._start_task(session.close("会话超时自动清理"))
 
         return expired_sessions
 
@@ -665,40 +665,64 @@ class HTTPAdapter(Platform):
                 logger.error(f"[HTTPAdapter] 清理循环出错: {e}")
 
     async def terminate(self):
-        """终止适配器并清理所有挂起任务"""
+        """终止适配器并清理所有资源"""
         logger.info("[HTTPAdapter] 正在关闭，清理异步任务...")
+
+        # 停止运行标志
         self._running = False
         self.shutdown_event.set()
-        
-        # 清理后台任务，防止 "Task was destroyed but it is pending"
+
+        # 取消并等待后台任务
         if self._background_tasks:
             for task in list(self._background_tasks):
                 task.cancel()
 
-            # 等待任务取消完成，不抛出异常
-            await asyncio.gather(*self._background_tasks, return_exceptions=True)
+            await asyncio.gather(
+                *self._background_tasks,
+                return_exceptions=True
+            )
 
-        # 清理未完成的 Future
-        for event_id in list(self.pending_responses.keys()):
-            pending = self.pending_responses.pop(event_id, None)
-            if pending and not pending.future.done():
-                pending.future.set_exception(asyncio.CancelledError())
+            self._background_tasks.clear()
 
-        # 取消清理任务
+        # 取消清理循环任务
         if self._cleanup_task:
             self._cleanup_task.cancel()
             try:
                 await self._cleanup_task
             except asyncio.CancelledError:
                 pass
-        
-        # 取消所有等待的响应
-        for event_id, pending in list(self.pending_responses.items()):
-            if not pending.future.done():
-                pending.future.set_exception(asyncio.CancelledError("适配器终止"))
+            except Exception as e:
+                logger.error(f"[HTTPAdapter] 清理任务关闭异常: {e}", exc_info=True)
 
-        self.sessions.clear()
-        self.pending_responses.clear()
+            self._cleanup_task = None
+
+        # 关闭所有活跃会话（关键修复）
+        if self.sessions:
+            logger.info(f"[HTTPAdapter] 正在关闭 {len(self.sessions)} 个会话")
+
+            await asyncio.gather(
+                *(
+                    session.close("适配器终止")
+                    for session in self.sessions.values()
+                ),
+                return_exceptions=True
+            )
+
+            self.sessions.clear()
+
+        # 取消所有等待中的响应
+        if self.pending_responses:
+            for event_id, pending in list(self.pending_responses.items()):
+                if not pending.future.done():
+                    pending.future.set_exception(
+                        asyncio.CancelledError("适配器终止")
+                    )
+
+            self.pending_responses.clear()
+
+        # 调用父类终止
         await super().terminate()
-        logger.info("[HTTPAdapter] 适配器已终止")
+
+        logger.info("[HTTPAdapter] 适配器已安全终止")
+
 
