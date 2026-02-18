@@ -69,18 +69,6 @@ class HTTPAdapterPlugin(Star):
             "hint": "CORS 允许的源，多个用逗号分隔，* 表示允许所有",
             "default": "*"
         },
-        "max_request_size": {
-            "description": "最大请求大小",
-            "type": "int",
-            "hint": "最大请求体大小（字节），默认 10MB",
-            "default": 10485760
-        },
-        "request_timeout": {
-            "description": "请求超时时间",
-            "type": "int",
-            "hint": "HTTP 请求超时时间（秒），默认 30",
-            "default": 30
-        }
     }
 
     _registered: bool = False
@@ -119,7 +107,7 @@ class HTTPAdapterPlugin(Star):
             self._http_adapter_cls = HTTPAdapter
             logger.info("[HTTPAdapter] HTTP 适配器导入成功")
         except ImportError as e:
-            logger.error(f"[HTTPAdapter] 导入 HTTP 适配器失败: {e}")
+            logger.error(f"[HTTPAdapter] 导入 HTTP 适配器失败: {e}", exc_info=True)
             raise
 
     def _register_config(self):
@@ -180,8 +168,6 @@ class HTTPAdapterPlugin(Star):
                 "enable_http_api": True,
                 "auth_token": "",
                 "cors_origins": "*",
-                "max_request_size": 10485760,  # 10MB
-                "request_timeout": 30,
             },
             i18n_resources={
                 "zh-CN": {
@@ -209,14 +195,6 @@ class HTTPAdapterPlugin(Star):
                         "description": "CORS 允许的源",
                         "hint": "跨域请求允许的来源，多个用逗号分隔，* 表示全部允许",
                     },
-                    "max_request_size": {
-                        "description": "最大请求大小 (bytes)",
-                        "hint": "允许的最大请求体大小，单位字节",
-                    },
-                    "request_timeout": {
-                        "description": "请求超时时间 (s)",
-                        "hint": "HTTP 请求处理超时时间，单位秒",
-                    }
                 },
                 "en-US": {
                     "http_host": {
@@ -243,14 +221,6 @@ class HTTPAdapterPlugin(Star):
                         "description": "CORS allowed origins",
                         "hint": "Allowed origins for CORS, comma separated, * for all",
                     },
-                    "max_request_size": {
-                        "description": "Max request size (bytes)",
-                        "hint": "Maximum allowed request body size in bytes",
-                    },
-                    "request_timeout": {
-                        "description": "Request timeout (s)",
-                        "hint": "HTTP request processing timeout in seconds",
-                    }
                 },
             },
             config_metadata={
@@ -284,16 +254,6 @@ class HTTPAdapterPlugin(Star):
                     "type": "string",
                     "hint": "跨域请求允许的来源，多个用逗号分隔，* 表示全部允许",
                 },
-                "max_request_size": {
-                    "description": "最大请求大小 (bytes)",
-                    "type": "int",
-                    "hint": "允许的最大请求体大小，单位字节",
-                },
-                "request_timeout": {
-                    "description": "请求超时时间 (s)",
-                    "type": "int",
-                    "hint": "HTTP 请求处理超时时间，单位秒",
-                }
             },
         )(HTTPAdapter)
 
@@ -309,8 +269,6 @@ class HTTPAdapterPlugin(Star):
                 "enable_http_api": True,
                 "auth_token": "",
                 "cors_origins": "*",
-                "max_request_size": 10485760,  # 10MB
-                "request_timeout": 30,
             }
         )(HTTPAdapter)
 

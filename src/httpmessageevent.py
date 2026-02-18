@@ -70,7 +70,7 @@ class HTTPMessageEvent(AstrMessageEvent):
                 # 对于 HTTP 适配器，流式发送实际上就是调用 send 方法
                 await self.send(message_chain)
         except Exception as e:
-            logger.error(f"[HTTPMessageEvent] 流式发送时出错: {e}")
+            logger.error(f"[HTTPMessageEvent] 流式发送时出错: {e}", exc_info=True)
             raise
 
 class StandardHTTPMessageEvent(HTTPMessageEvent):
@@ -215,14 +215,15 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             self._stream_complete.clear()
 
             # 流式发送每个消息块
-            self._finalcall = await self.queue_put_generator(generator)
+            await self.queue_put_generator(generator)
+            self._finalcall = True
 
             # 注意：这里不再发送 END 信号，只标记内部完成
             self._is_streaming = False
             self._stream_complete.set()
 
         except Exception as e:
-            logger.error(f"[StreamHTTPMessageEvent] 流式发送时出错: {e}")
+            logger.error(f"[StreamHTTPMessageEvent] 流式发送时出错: {e}", exc_info=True)
 
             # 发送错误信息（错误时仍然需要通知客户端）
             try:
@@ -233,7 +234,7 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
                 if not success:
                     self._is_streaming = False
             except Exception as queue_error:
-                logger.error(f"[StreamHTTPMessageEvent] 发送错误信息时失败: {queue_error}")
+                logger.error(f"[StreamHTTPMessageEvent] 发送错误信息时失败: {queue_error}", exc_info=True)
 
             # 标记流式传输完成（即使出错）
             self._is_streaming = False
@@ -292,7 +293,6 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
                     # 队列持续满，停止生成
                     self._is_streaming = False
                     break
-        return True
 
     def get_has_send_oper(self):
         return self._has_send_oper

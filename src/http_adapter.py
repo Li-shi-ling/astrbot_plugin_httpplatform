@@ -55,7 +55,9 @@ class HTTPAdapter(Platform):
         self.api_prefix = platform_config.get("api_prefix", "/api/v1").rstrip("/")
         self.enable_http_api = platform_config.get("enable_http_api", True)
         self.auth_token = platform_config.get("auth_token", "")
-        self.cors_origins = platform_config.get("cors_origins", "*").split(",")
+        self.cors_origins = platform_config.get("cors_origins", "*")
+        if isinstance(self.cors_origins, str):
+            self.cors_origins = self.cors_origins.split(",")
 
         # 统计信息
         self.total_requests_processed = 0
@@ -97,7 +99,7 @@ class HTTPAdapter(Platform):
             description="HTTP/HTTPS 适配器 - 提供外部 HTTP 接口",
             id=platform_id,
             support_streaming_message=True,
-            support_proactive_message=True,
+            support_proactive_message=False,
         )
 
         self._background_tasks = set() # 用于追踪任务
@@ -165,7 +167,8 @@ class HTTPAdapter(Platform):
         auth_result = await self._check_auth(request_obj)
         if auth_result is not None:
             return auth_result
-
+        future = None
+        event_id = None
         try:
             # 获取请求数据
             data = await request_obj.get_json()
@@ -251,6 +254,12 @@ class HTTPAdapter(Platform):
             # 等待响应
             try:
                 timeout = data.get('timeout', 30)
+                if not isinstance(timeout, int):
+                    logger.error(f"[HTTPAdapter] 不兼容的 timeout:{timeout} 尝试转变为 int")
+                    timeout = int(timeout)
+                if timeout < 0:
+                    logger.error(f"[HTTPAdapter] timeout:{timeout} < 0 使用 30")
+                    timeout = 30
                 response = await asyncio.wait_for(future, timeout=timeout)
 
                 # 构建响应
@@ -281,8 +290,13 @@ class HTTPAdapter(Platform):
             return jsonify({"error": "无效的 JSON 数据"}), HTTP_STATUS_CODE["BAD_REQUEST"]
         except Exception as e:
             self.total_errors += 1
+            if future and not future.done():
+                future.set_exception(e)
             logger.error(f"[HTTPAdapter] 处理HTTP请求时出错: {e}", exc_info=True)
             return jsonify({"error": f"内部服务器错误: {str(e)}"}), HTTP_STATUS_CODE["INTERNAL_ERROR"]
+        finally:
+            if not event_id is None:
+                self.pending_responses.pop(event_id)
 
     async def _handle_http_stream_message(self, request_obj) -> Any:
         """处理 HTTP 流式消息请求 - 修复版，支持多条消息"""
@@ -435,7 +449,10 @@ class HTTPAdapter(Platform):
                     if event_id in self.pending_responses:
                         self.pending_responses.pop(event_id, None)
                     # 通知事件停止生成
-                    await queue.put(None)
+                    try:
+                        queue.put_nowait(None)
+                    except:
+                        pass
                     if hasattr(event, "_is_streaming"):
                         event._is_streaming = False
                     logger.info(f"[HTTPAdapter] SSE连接结束: {event_id}, 会话: {session_id}")

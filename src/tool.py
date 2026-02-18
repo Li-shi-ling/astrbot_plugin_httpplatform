@@ -82,7 +82,7 @@ def Json2BMC(data: Dict[str, Any]) -> BaseMessageComponent:
     # 如果没有 type 字段
     if not data_type:
         data_text = json.dumps(data, ensure_ascii=False)
-        logger.info(f"[Json2BMC] 未获取到data_type,data:{data_text}")
+        logger.debug(f"[Json2BMC] 未获取到data_type,data:{data_text}")
         return Plain(text=data_text)
 
     component_class = COMPONENT_TYPES.get(data_type.lower())
@@ -90,7 +90,7 @@ def Json2BMC(data: Dict[str, Any]) -> BaseMessageComponent:
     # 未知类型
     if component_class is None:
         data_text = json.dumps(data, ensure_ascii=False)
-        logger.info(f"[Json2BMC] 未知类型:{data_text}")
+        logger.debug(f"[Json2BMC] 未知类型:{data_text}")
         return Unknown(text=data_text)
 
     data_content = data.get("data") or {}
