@@ -347,7 +347,7 @@ class HTTPAdapterPlugin(Star):
         )(HTTPAdapter)
 
     @filter.command_group("http")
-    async def http(self):
+    async def http(self, event: AstrMessageEvent):
         pass
 
     @http.command("ghp")
@@ -369,7 +369,7 @@ class HTTPAdapterPlugin(Star):
 
     @filter.on_llm_response()
     async def on_llm_response(self, event: AstrMessageEvent, req: LLMResponse):
-        """在LLM响应后处理消息的结束"""
+        """在LLM响应后，处理消息的结束"""
         if not req.role == "assistant":
             return
 
@@ -385,8 +385,18 @@ class HTTPAdapterPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE, priority=-999999)
     async def other_message(self, event: AstrMessageEvent):
-        if event._has_send_oper:
-            if isinstance(event, StandardHTTPMessageEvent):
+        """如果在插件调用后就结束了事件，处理消息的结束"""
+        if isinstance(event, StandardHTTPMessageEvent):
+            if not (
+                    not event.get_has_send_oper()
+                    and event.is_at_or_wake_command
+                    and not event.call_llm
+            ):
                 await event.send_response()
-            elif isinstance(event, StreamHTTPMessageEvent):
+        elif isinstance(event, StreamHTTPMessageEvent):
+            if not (
+                    not event.get_has_send_oper()
+                    and event.is_at_or_wake_command
+                    and not event.call_llm
+            ):
                 await event.send_end_signal()

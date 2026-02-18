@@ -94,13 +94,10 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         full_response = []
         for message in message_chain.chain:
             response_text, text_type = BMC2Text(message)
-            if "AstrBot 请求失败。" in response_text:
-                self._finalcall = True
-                break
             full_response.append({
                 "content": response_text,
                 "type": text_type
-        })
+            })
 
         # 如果没有消息，返回空数组
         if not full_response:
@@ -168,6 +165,9 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
     def setfinalcall(self):
         self._finalcall = True
 
+    def get_has_send_oper(self):
+        return self._has_send_oper
+
 class StreamHTTPMessageEvent(HTTPMessageEvent):
     """流式 HTTP 消息事件
     特点：send方法不处理（保持不动），send_streaming方法流式发送消息（不发送结束信号）
@@ -190,9 +190,6 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
         # 发送完整消息（这将发送多条消息，但不会发送结束信号）
         for message in message_chain.chain:
             response_text, text_type = BMC2Text(message)
-            if "AstrBot 请求失败。" in response_text:
-                self._finalcall = True
-                break
             await self.queue.put({
                 "type": HTTP_MESSAGE_TYPE["MESSAGE"],
                 "data": {"content": response_text},
@@ -281,12 +278,12 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
         async for message_chain in generator:
             for message in message_chain.chain:
                 response_text, text_type = BMC2Text(message)
-                if "AstrBot 请求失败。" in response_text:
-                    self._finalcall = True
-                    return True
                 await self.queue.put({
                     "type": HTTP_MESSAGE_TYPE["STREAM"],
                     "data": {"chunk": response_text},
                     "text_type": text_type
                 })
         return False
+
+    def get_has_send_oper(self):
+        return self._has_send_oper

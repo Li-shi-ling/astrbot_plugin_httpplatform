@@ -68,9 +68,9 @@ def BMC2Text(data: BaseMessageComponent) -> tuple[str, str]:
         data: BaseMessageComponent 对象
 
     Returns:
-        tuple: (JSON字符串, 类型字符串)
+        tuple: (Dict, 类型字符串)
     """
-    return json.dumps(data.toDict()), str(data.type)
+    return data.toDict(), str(data.type)
 
 # Dict类列表转变为BMC
 def Json2BMC(data: Dict[str, Any]) -> BaseMessageComponent:
