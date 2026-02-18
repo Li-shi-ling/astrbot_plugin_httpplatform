@@ -220,6 +220,7 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             # 注意：这里不再发送 END 信号，只标记内部完成
             self._is_streaming = False
             self._stream_complete.set()
+            self._finalcall = True
 
         except Exception as e:
             logger.error(f"[StreamHTTPMessageEvent] 流式发送时出错: {e}")
