@@ -404,6 +404,10 @@ class HTTPAdapter(Platform):
 
                 try:
                     while not received_end_event:
+                        # 客户端断连检测
+                        if await request.is_disconnected():
+                            logger.info(f"[HTTPAdapter] 客户端断连: {event_id}")
+                            break
                         # 检查总超时
                         current_time = time.time()
                         if current_time - start_time > timeout:
@@ -434,13 +438,15 @@ class HTTPAdapter(Platform):
 
                             # 处理事件
                             event_type = item.get('type')
-                            event_data = item.get('data', {})
 
                             # 更新最后活动时间
                             last_activity_time = time.time()
 
                             # 发送事件
-                            yield f"event: {event_type}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+                            yield (
+                                f"event: {item.get('type')}\n"
+                                f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+                            )
 
                             # 如果是 end 事件，结束循环
                             if event_type == HTTP_MESSAGE_TYPE['END']:
@@ -459,6 +465,10 @@ class HTTPAdapter(Platform):
                 finally:
                     if event_id in self.pending_responses:
                         self.pending_responses.pop(event_id, None)
+                    # 通知事件停止生成
+                    await queue.put(None)
+                    if hasattr(event, "_is_streaming"):
+                        event._is_streaming = False
                     logger.info(f"[HTTPAdapter] SSE连接结束: {event_id}, 会话: {session_id}")
 
             headers = {

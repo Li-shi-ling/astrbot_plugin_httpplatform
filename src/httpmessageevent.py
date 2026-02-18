@@ -150,7 +150,7 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
 
         # 设置响应结果
         if pending and not pending.future.done():
-            result_json =self._cached_response, ensure_ascii=False
+            result_json = self._cached_response
             pending.future.set_result(result_json)
 
             logger.debug(f"[StandardHTTPMessageEvent] 已发送响应 (event_id: {self.event_id}, 消息数: {len(self._cached_response)})")
@@ -185,11 +185,14 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
         # 发送完整消息（这将发送多条消息，但不会发送结束信号）
         for message in message_chain.chain:
             response_text, text_type = BMC2Text(message)
-            await self.queue.put({
+            success = await self._safe_put({
                 "type": HTTP_MESSAGE_TYPE["MESSAGE"],
                 "data": {"content": response_text},
                 "text_type": text_type
             })
+            if not success:
+                self._is_streaming = False
+                break
 
         if self._finalcall:
             await self.send_end_signal()
@@ -223,10 +226,12 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
 
             # 发送错误信息（错误时仍然需要通知客户端）
             try:
-                await self.queue.put({
+                success = await self._safe_put({
                     "type": HTTP_MESSAGE_TYPE["ERROR"],
                     "data": {"error": str(e)}
                 })
+                if not success:
+                    self._is_streaming = False
             except Exception as queue_error:
                 logger.error(f"[StreamHTTPMessageEvent] 发送错误信息时失败: {queue_error}")
 
@@ -260,25 +265,45 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
                 self._is_streaming = False
 
         # 发送结束信号
-        await self.queue.put({
+        success = await self._safe_put({
             "type": HTTP_MESSAGE_TYPE["END"],
             "data": {}
         })
+        if not success:
+            self._is_streaming = False
         logger.debug(f"[StreamHTTPMessageEvent] 已发送结束信号 (event_id: {self.event_id})")
 
     def setfinalcall(self):
         self._finalcall = True
 
-    async def queue_put_generator(self, generator: AsyncGenerator[MessageChain, None]):
+    async def queue_put_generator(self, generator):
         async for message_chain in generator:
+            if not self._is_streaming:
+                break
             for message in message_chain.chain:
                 response_text, text_type = BMC2Text(message)
-                await self.queue.put({
-                    "type": HTTP_MESSAGE_TYPE["STREAM"],
-                    "data": {"chunk": response_text},
+
+                success = await self._safe_put({
+                    "type": HTTP_MESSAGE_TYPE["MESSAGE"],
+                    "data": {"content": response_text},
                     "text_type": text_type
                 })
+                if not success:
+                    # 队列持续满，停止生成
+                    self._is_streaming = False
+                    break
         return False
 
     def get_has_send_oper(self):
         return self._has_send_oper
+
+    async def _safe_put(self, item: dict, timeout: float = 1.0):
+        """安全入队，防止反压阻塞"""
+        try:
+            await asyncio.wait_for(self.queue.put(item), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"[StreamHTTPMessageEvent] 队列已满，丢弃消息 (event_id: {self.event_id})"
+            )
+            return False
