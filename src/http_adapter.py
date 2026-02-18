@@ -460,8 +460,6 @@ class HTTPAdapter(Platform):
                 except Exception as e:
                     logger.error(f"[HTTPAdapter] 生成SSE时出错: {e}", exc_info=True)
                 finally:
-                    if event_id in self.pending_responses:
-                        self.pending_responses.pop(event_id, None)
                     # 通知事件停止生成
                     try:
                         queue.put_nowait(None)

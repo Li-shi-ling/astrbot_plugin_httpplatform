@@ -157,11 +157,11 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         else:
             logger.warning(f"[StandardHTTPMessageEvent] 没有找到待处理响应: event_id={self.event_id}")
 
-    def setfinalcall(self):
+    def set_final_call(self):
         self._finalcall = True
 
     def get_has_send_oper(self):
-        return self._has_send_oper
+        return getattr(self, "_has_send_oper", False)
 
 class StreamHTTPMessageEvent(HTTPMessageEvent):
     """流式 HTTP 消息事件
@@ -274,7 +274,7 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             self._is_streaming = False
         logger.debug(f"[StreamHTTPMessageEvent] 已发送结束信号 (event_id: {self.event_id})")
 
-    def setfinalcall(self):
+    def set_final_call(self):
         self._finalcall = True
 
     async def queue_put_generator(self, generator):
