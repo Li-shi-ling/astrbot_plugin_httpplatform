@@ -4,7 +4,7 @@ from astrbot.api import logger
 
 from .dataclasses import HTTPRequestData
 from .constants import HTTP_MESSAGE_TYPE, HTTP_EVENT_TYPE
-from .tool import BMC2Text
+from .tool import BMC2Dict
 
 from collections.abc import AsyncGenerator
 import asyncio
@@ -90,7 +90,7 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         # 处理消息链
         full_response = []
         for message in message_chain.chain:
-            response_json, text_type = BMC2Text(message)
+            response_json, text_type = BMC2Dict(message)
             full_response.append({
                 "content": response_json,
                 "type": text_type
@@ -184,7 +184,7 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
 
         # 发送完整消息（这将发送多条消息，但不会发送结束信号）
         for message in message_chain.chain:
-            response_text, text_type = BMC2Text(message)
+            response_text, text_type = BMC2Dict(message)
             success = await self._safe_put({
                 "type": HTTP_MESSAGE_TYPE["MESSAGE"],
                 "data": {"content": response_text},
@@ -281,7 +281,7 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             if not self._is_streaming:
                 break
             for message in message_chain.chain:
-                response_text, text_type = BMC2Text(message)
+                response_text, text_type = BMC2Dict(message)
 
                 success = await self._safe_put({
                     "type": HTTP_MESSAGE_TYPE["MESSAGE"],
