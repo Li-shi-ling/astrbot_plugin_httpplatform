@@ -1,6 +1,6 @@
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.event import MessageChain
-from astrbot import logger
+from astrbot.api import logger
 
 from .dataclasses import HTTPRequestData
 from .constants import HTTP_MESSAGE_TYPE, HTTP_EVENT_TYPE

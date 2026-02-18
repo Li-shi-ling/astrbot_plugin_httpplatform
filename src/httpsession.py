@@ -5,7 +5,7 @@ from .dataclasses import HTTPRequestData, PendingResponse, SessionStats, Adapter
 from astrbot.api.message_components import Plain
 import asyncio
 import uuid
-from astrbot import logger
+from astrbot.api import logger
 from astrbot.api.platform import (
     AstrBotMessage,
     MessageMember,

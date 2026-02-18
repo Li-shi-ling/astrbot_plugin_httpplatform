@@ -26,7 +26,7 @@ from astrbot.api.message_components import (
 )
 import json
 from typing import Dict, Any, List, Union
-from astrbot import logger
+from astrbot.api import logger
 import inspect
 from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
 

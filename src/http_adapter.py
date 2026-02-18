@@ -15,7 +15,7 @@ from collections.abc import Coroutine
 from quart import Quart, request, jsonify, make_response
 from quart_cors import cors
 
-from astrbot import logger
+from astrbot.api import logger
 from astrbot.api.event import MessageChain
 from astrbot.api.message_components import Plain
 from astrbot.api.platform import (
