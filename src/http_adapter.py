@@ -326,9 +326,12 @@ class HTTPAdapter(Platform):
             message = data.get('message')
             if not message:
                 return jsonify({"error": "message 参数是必需的"}), HTTP_STATUS_CODE["BAD_REQUEST"]
-            messages = []
             if isinstance(message, list):
                 messages = Json2BMCChain(message)
+            else:
+                # 如果是字符串，包装成 Plain 消息
+                from astrbot.message.message import Plain
+                messages = [Plain(text=str(message))]
             # 收集请求头信息
             headers = dict(request_obj.headers)
             request_data = HTTPRequestData(
@@ -361,11 +364,8 @@ class HTTPAdapter(Platform):
                 abm.type = MessageType.GROUP_MESSAGE
                 abm.session_id = session_id
                 abm.message_id = str(uuid.uuid4().hex)
-                if messages is None:
-                    abm.message = [Plain(text=message)]
-                else:
-                    abm.message = messages
-                abm.message_str = message
+                abm.message = messages
+                abm.message_str = message if isinstance(message, str) else json.dumps(message, ensure_ascii=False)
                 abm.raw_message = data
                 abm.timestamp = int(time.time())
 
