@@ -99,6 +99,7 @@ class HTTPAdapterPlugin(Star):
 
     def __init__(self, context: Context):
         super().__init__(context)
+        self.httpadapter = {}
 
         # 导入 HTTP 适配器以注册它
         # 装饰器会自动注册适配器
@@ -111,14 +112,21 @@ class HTTPAdapterPlugin(Star):
                 logger.warning("[astrbook] 没有找到astrbot版本号,使用4.14.8前的metadata注册方案")
                 self.register_414()
             else:
-                v1 = [int(x) for x in version.split('.')]
-                v2 = [int(x) for x in "4.16.0".split('.')]
-                max_len = max(len(v1), len(v2))
-                v1 += [0] * (max_len - len(v1))
-                v2 += [0] * (max_len - len(v2))
-                if v1 >= v2:
-                    self.register_416()
-                else:
+                try:
+                    # 提取版本号中的数字部分（如 4.16.0-beta -> [4,16,0]）
+                    import re
+                    version_parts = re.findall(r'\d+', version)
+                    v1 = [int(x) for x in version_parts]
+                    v2 = [int(x) for x in "4.16.0".split('.')]
+                    max_len = max(len(v1), len(v2))
+                    v1 += [0] * (max_len - len(v1))
+                    v2 += [0] * (max_len - len(v2))
+                    if v1 >= v2:
+                        self.register_416()
+                    else:
+                        self.register_414()
+                except ValueError as e:
+                    logger.warning(f"[astrbook] 解析版本号失败: {version}, {e}, 使用默认的4.14.8前注册方案")
                     self.register_414()
             self._http_adapter_cls = HTTPAdapter
             logger.info("[HTTPAdapter] HTTP 适配器导入成功")
