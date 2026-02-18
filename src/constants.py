@@ -1,10 +1,9 @@
 """
 HTTP 适配器常量定义
 """
-from types import MappingProxyType
 
 # ==================== HTTP 消息类型常量 ====================
-HTTP_MESSAGE_TYPE = MappingProxyType({
+HTTP_MESSAGE_TYPE = {
     "MESSAGE": "message",
     "PING": "ping",
     "PONG": "pong",
@@ -16,16 +15,16 @@ HTTP_MESSAGE_TYPE = MappingProxyType({
     "STREAM": "stream",
     "TIMEOUT": "timeout",
     "END": "end"
-})
+}
 
 # ==================== HTTP 事件类型常量 ====================
-HTTP_EVENT_TYPE = MappingProxyType({
+HTTP_EVENT_TYPE = {
     "HTTP_REQUEST": "http_request",
     "STREAMING": "streaming"
-})
+}
 
 # ==================== HTTP 状态码常量 ====================
-HTTP_STATUS_CODE = MappingProxyType({
+HTTP_STATUS_CODE = {
     "OK": 200,
     "BAD_REQUEST": 400,
     "UNAUTHORIZED": 401,
@@ -33,5 +32,5 @@ HTTP_STATUS_CODE = MappingProxyType({
     "NOT_FOUND": 404,
     "TIMEOUT": 504,
     "INTERNAL_ERROR": 500
-})
+}
 

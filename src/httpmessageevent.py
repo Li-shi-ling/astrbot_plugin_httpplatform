@@ -1,14 +1,15 @@
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.event import MessageChain
-from astrbot.api import logger
+from astrbot import logger
 
 from .dataclasses import HTTPRequestData
-from .constants import HTTP_MESSAGE_TYPE
-from .tool import BMC2Text
+from .constants import HTTP_MESSAGE_TYPE, HTTP_EVENT_TYPE
+from .tool import BMC2Text, find_tool_loop_agent_runner_with_stack_info
+from astrbot.core.message.message_event_result import MessageEventResult
 
 from collections.abc import AsyncGenerator
-import json
 import asyncio
+import json
 
 # ==================== HTTP 消息事件类 ====================
 class HTTPMessageEvent(AstrMessageEvent):
@@ -81,6 +82,7 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
 
     def __init__(self, message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data):
         super().__init__(message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data)
+        self._pending_response = None  # 保存待处理响应
         self._cached_response = None  # 缓存完整的响应数据
         self._finalcall = False
 
@@ -92,11 +94,13 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         full_response = []
         for message in message_chain.chain:
             response_text, text_type = BMC2Text(message)
-            # 直接检查消息内容，不依赖JSON字符串
+            if "AstrBot 请求失败。" in response_text:
+                self._finalcall = True
+                break
             full_response.append({
                 "content": response_text,
                 "type": text_type
-            })
+        })
 
         # 如果没有消息，返回空数组
         if not full_response:
@@ -106,7 +110,6 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         self._cached_response = full_response
         logger.debug(f"[StandardHTTPMessageEvent] 已缓存响应数据 (event_id: {self.event_id}, 消息数: {len(full_response)})")
 
-        # 不需要特殊的失败判断，让所有消息都被正确处理
         if self._finalcall:
             await self.send_response()
             self._finalcall = False
@@ -155,8 +158,8 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
 
         # 设置响应结果
         if pending and not pending.future.done():
-            # 直接返回原始对象，避免双重JSON编码
-            pending.future.set_result(self._cached_response)
+            result_json = json.dumps(self._cached_response, ensure_ascii=False)
+            pending.future.set_result(result_json)
 
             logger.debug(f"[StandardHTTPMessageEvent] 已发送响应 (event_id: {self.event_id}, 消息数: {len(self._cached_response)})")
         else:
@@ -187,16 +190,14 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
         # 发送完整消息（这将发送多条消息，但不会发送结束信号）
         for message in message_chain.chain:
             response_text, text_type = BMC2Text(message)
-            # 直接发送消息，不做失败判断，添加超时机制避免阻塞
-            try:
-                await asyncio.wait_for(self.queue.put({
-                    "type": HTTP_MESSAGE_TYPE["MESSAGE"],
-                    "data": {"content": response_text, "text_type": text_type}
-                }), timeout=1.0)
-            except asyncio.TimeoutError:
-                logger.warning(f"[StreamHTTPMessageEvent] 队列已满，消息发送超时 (event_id: {self.event_id})")
-                # 可以选择丢弃消息或采取其他策略
+            if "AstrBot 请求失败。" in response_text:
+                self._finalcall = True
                 break
+            await self.queue.put({
+                "type": HTTP_MESSAGE_TYPE["MESSAGE"],
+                "data": {"content": response_text},
+                "text_type": text_type
+            })
 
         if self._finalcall:
             await self.send_end_signal()
@@ -280,14 +281,12 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
         async for message_chain in generator:
             for message in message_chain.chain:
                 response_text, text_type = BMC2Text(message)
-                # 直接发送消息，不做失败判断，添加超时机制避免阻塞
-                try:
-                    await asyncio.wait_for(self.queue.put({
-                        "type": HTTP_MESSAGE_TYPE["STREAM"],
-                        "data": {"chunk": response_text, "text_type": text_type}
-                    }), timeout=1.0)
-                except asyncio.TimeoutError:
-                    logger.warning(f"[StreamHTTPMessageEvent] 队列已满，消息发送超时 (event_id: {self.event_id})")
-                    # 可以选择丢弃消息或采取其他策略
-                    continue
+                if "AstrBot 请求失败。" in response_text:
+                    self._finalcall = True
+                    return True
+                await self.queue.put({
+                    "type": HTTP_MESSAGE_TYPE["STREAM"],
+                    "data": {"chunk": response_text},
+                    "text_type": text_type
+                })
         return False

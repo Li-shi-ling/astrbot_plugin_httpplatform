@@ -26,7 +26,7 @@ from astrbot.api.message_components import (
 )
 import json
 from typing import Dict, Any, List, Union
-from astrbot.api import logger
+from astrbot import logger
 import inspect
 from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
 
@@ -56,42 +56,21 @@ ComponentTypes = {
     "nodes": Nodes,
     "json": Json,
     "unknown": Unknown,
-    "wechatemoji": WechatEmoji,
+    "WechatEmoji": WechatEmoji,
 }
 
 # BMC类型转变为Text
 def BMC2Text(data: BaseMessageComponent) -> tuple[str, str]:
     """
-    将 BaseMessageComponent 对象转换为可读文本和类型字符串
+    将 BaseMessageComponent 对象转换为 JSON 字符串和类型字符串
 
     Args:
         data: BaseMessageComponent 对象
 
     Returns:
-        tuple: (可读文本, 类型字符串)
+        tuple: (JSON字符串, 类型字符串)
     """
-    # 对于不同类型的消息组件，返回更合理的文本表示
-    if isinstance(data, Plain):
-        return data.text, str(data.type)
-    elif isinstance(data, Image):
-        return f"[图片: {data.file or data.url or data.path}]", str(data.type)
-    elif isinstance(data, Record):
-        return f"[语音: {data.file or data.url or data.path}]", str(data.type)
-    elif isinstance(data, Video):
-        return f"[视频: {data.file or data.path}]", str(data.type)
-    elif isinstance(data, File):
-        return f"[文件: {data.name}]", str(data.type)
-    elif isinstance(data, At):
-        return f"[At: {data.qq}]", str(data.type)
-    elif isinstance(data, AtAll):
-        return "[At全体成员]", "at"
-    elif isinstance(data, Face):
-        return f"[表情: {data.id}]", str(data.type)
-    elif isinstance(data, Reply):
-        return f"[回复: {data.id}]", str(data.type)
-    else:
-        # 对于其他类型，返回其字典表示的JSON字符串
-        return json.dumps(data.toDict()), str(data.type)
+    return json.dumps(data.toDict()), str(data.type)
 
 # Dict类列表转变为BMC
 def Json2BMC(data: Dict[str, Any]) -> BaseMessageComponent:
@@ -215,20 +194,7 @@ def Json2BMC(data: Dict[str, Any]) -> BaseMessageComponent:
         return component_class(**data_content)
     except TypeError as e:
         # 如果参数不匹配，尝试只传递必要的参数
-        try:
-            # 检查组件类是否有__fields__属性
-            if hasattr(component_class, '__fields__'):
-                return component_class(**{k: v for k, v in data_content.items() if k in component_class.__fields__})
-            else:
-                # 如果没有__fields__属性，返回Unknown组件
-                data_text = json.dumps(data)
-                logger.info(f"[Json2BMC] 组件类 {component_class.__name__} 没有__fields__属性，返回Unknown组件: {data_text}")
-                return Unknown(text=data_text)
-        except Exception as fallback_error:
-            # 如果回退也失败，返回Unknown组件
-            data_text = json.dumps(data)
-            logger.info(f"[Json2BMC] 创建组件失败，返回Unknown组件: {data_text}")
-            return Unknown(text=data_text)
+        return component_class(**{k: v for k, v in data_content.items() if k in component_class.__fields__})
 
 # 辅助函数：解析消息链
 def Json2BMCChain(data_list: List[Dict[str, Any]]) -> List[BaseMessageComponent]:
@@ -296,36 +262,52 @@ def find_tool_loop_agent_runner_in_callstack() -> ToolLoopAgentRunner | None:
 # 更详细的获取调用栈里面的ToolLoopAgentRunner
 def find_tool_loop_agent_runner_with_stack_info() -> ToolLoopAgentRunner | None:
     """
-    获取当前调用栈，并在其中查找 ToolLoopAgentRunner 类的实例方法调用，
+    获取当前调用栈，打印调用栈信息，并在其中查找 ToolLoopAgentRunner 类的实例方法调用，
     返回找到的 ToolLoopAgentRunner 实例。
 
     Returns:
         ToolLoopAgentRunner: 找到的实例，如果没有找到则返回 None
     """
+    import traceback
+
     current_frame = inspect.currentframe()
 
     try:
+        # 获取完整的调用栈信息（用于调试）
+        stack = traceback.extract_stack()
+        logger.debug("[find_tool_loop_agent_runner] 当前调用栈:")
+        for i, frame_info in enumerate(stack[:-1]):  # 排除当前函数
+            logger.debug(f"  {i}: {frame_info.filename}:{frame_info.lineno} in {frame_info.name}")
+
         # 向上遍历调用栈查找实例
         frame = current_frame.f_back
+        frame_index = 0
 
         while frame:
-            # 获取当前帧的局部变量
+            # 获取当前帧的信息
+            frame_info = inspect.getframeinfo(frame)
             local_vars = frame.f_locals
+
+            logger.debug(
+                f"[find_tool_loop_agent_runner] 检查帧 {frame_index}: {frame_info.function} at {frame_info.filename}:{frame_info.lineno}")
 
             # 检查是否为实例方法（有 self 参数）
             if 'self' in local_vars:
                 instance = local_vars['self']
                 if isinstance(instance, ToolLoopAgentRunner):
-                    logger.debug("[find_tool_loop_agent_runner] 找到 ToolLoopAgentRunner 实例")
+                    logger.debug(f"[find_tool_loop_agent_runner] ✓ 在 self 中找到 ToolLoopAgentRunner 实例")
                     return instance
+                else:
+                    logger.debug(f"[find_tool_loop_agent_runner]   self 类型为: {type(instance)}")
 
             # 检查局部变量
             for var_name, var_value in local_vars.items():
                 if var_name not in ['self', '__class__'] and isinstance(var_value, ToolLoopAgentRunner):
-                    logger.debug(f"[find_tool_loop_agent_runner] 在变量 {var_name} 中找到 ToolLoopAgentRunner 实例")
+                    logger.debug(f"[find_tool_loop_agent_runner] ✓ 在变量 {var_name} 中找到 ToolLoopAgentRunner 实例")
                     return var_value
 
             frame = frame.f_back
+            frame_index += 1
 
         logger.debug("[find_tool_loop_agent_runner] 未找到 ToolLoopAgentRunner 实例")
         return None
