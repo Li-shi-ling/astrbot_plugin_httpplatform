@@ -24,14 +24,13 @@ from astrbot.api.platform import (
     MessageType,
     Platform,
     PlatformMetadata,
-    register_platform_adapter,
 )
 from astrbot.core.platform.astr_message_event import MessageSesion
 
 # 导入常量和数据类
-from .constants import HTTP_MESSAGE_TYPE, HTTP_EVENT_TYPE, HTTP_STATUS_CODE
-from .dataclasses import HTTPRequestData, PendingResponse, SessionStats, AdapterStats
-from .httpmessageevent import StandardHTTPMessageEvent, HTTPMessageEvent, StreamHTTPMessageEvent
+from .constants import HTTP_MESSAGE_TYPE, HTTP_STATUS_CODE
+from .dataclasses import HTTPRequestData, PendingResponse, AdapterStats
+from .httpmessageevent import StandardHTTPMessageEvent, StreamHTTPMessageEvent
 from .httpsession import HTTPSession
 from .tool import Json2BMCChain
 
@@ -331,7 +330,7 @@ class HTTPAdapter(Platform):
                 messages = Json2BMCChain(message)
             else:
                 # 如果是字符串，包装成 Plain 消息
-                from astrbot.message.message import Plain
+                from astrbot.api.message_components import Plain
                 messages = [Plain(text=str(message))]
             # 收集请求头信息
             headers = dict(request_obj.headers)

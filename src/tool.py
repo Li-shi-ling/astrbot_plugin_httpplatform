@@ -25,10 +25,8 @@ from astrbot.api.message_components import (
     WechatEmoji,
 )
 import json
-from typing import Dict, Any, List, Union
+from typing import Dict, Any, List
 from astrbot.api import logger
-import inspect
-from astrbot.core.agent.runners.tool_loop_agent_runner import ToolLoopAgentRunner
 
 # 已有的 ComponentTypes 映射
 ComponentTypes = {
@@ -192,7 +190,7 @@ def Json2BMC(data: Dict[str, Any]) -> BaseMessageComponent:
     # 对于其他组件，直接使用参数解包创建实例
     try:
         return component_class(**data_content)
-    except TypeError as e:
+    except TypeError:
         # 如果参数不匹配，尝试只传递必要的参数
         return component_class(**{k: v for k, v in data_content.items() if k in component_class.__fields__})
 
@@ -212,108 +210,3 @@ def Json2BMCChain(data_list: List[Dict[str, Any]]) -> List[BaseMessageComponent]
         if isinstance(item, dict):
             components.append(Json2BMC(item))
     return components
-
-# 获取调用栈里面的ToolLoopAgentRunner
-def find_tool_loop_agent_runner_in_callstack() -> ToolLoopAgentRunner | None:
-    """
-    获取当前调用栈，并在其中查找 ToolLoopAgentRunner 类的实例方法调用，
-    返回找到的 ToolLoopAgentRunner 实例。
-
-    Returns:
-        ToolLoopAgentRunner: 找到的实例，如果没有找到则返回 None
-    """
-    # 获取当前调用栈
-    current_frame = inspect.currentframe()
-
-    try:
-        # 向上遍历调用栈
-        frame = current_frame.f_back
-        while frame:
-            # 获取当前帧的局部变量
-            local_vars = frame.f_locals
-
-            # 检查是否为实例方法（有 self 参数）
-            if 'self' in local_vars:
-                instance = local_vars['self']
-
-                # 检查实例是否为 ToolLoopAgentRunner 类型
-                if isinstance(instance, ToolLoopAgentRunner):
-                    logger.debug(f"[find_tool_loop_agent_runner] 找到 ToolLoopAgentRunner 实例: {instance}")
-                    return instance
-
-            # 检查局部变量中是否有 ToolLoopAgentRunner 实例
-            for var_name, var_value in local_vars.items():
-                if isinstance(var_value, ToolLoopAgentRunner):
-                    logger.debug(f"[find_tool_loop_agent_runner] 在变量 {var_name} 中找到 ToolLoopAgentRunner 实例")
-                    return var_value
-
-            # 继续向上查找
-            frame = frame.f_back
-
-        logger.debug("[find_tool_loop_agent_runner] 在调用栈中未找到 ToolLoopAgentRunner 实例")
-        return None
-
-    finally:
-        # 清理帧引用以避免内存泄漏
-        del current_frame
-        if 'frame' in locals():
-            del frame
-
-# 更详细的获取调用栈里面的ToolLoopAgentRunner
-def find_tool_loop_agent_runner_with_stack_info() -> ToolLoopAgentRunner | None:
-    """
-    获取当前调用栈，打印调用栈信息，并在其中查找 ToolLoopAgentRunner 类的实例方法调用，
-    返回找到的 ToolLoopAgentRunner 实例。
-
-    Returns:
-        ToolLoopAgentRunner: 找到的实例，如果没有找到则返回 None
-    """
-    import traceback
-
-    current_frame = inspect.currentframe()
-
-    try:
-        # 获取完整的调用栈信息（用于调试）
-        stack = traceback.extract_stack()
-        logger.debug("[find_tool_loop_agent_runner] 当前调用栈:")
-        for i, frame_info in enumerate(stack[:-1]):  # 排除当前函数
-            logger.debug(f"  {i}: {frame_info.filename}:{frame_info.lineno} in {frame_info.name}")
-
-        # 向上遍历调用栈查找实例
-        frame = current_frame.f_back
-        frame_index = 0
-
-        while frame:
-            # 获取当前帧的信息
-            frame_info = inspect.getframeinfo(frame)
-            local_vars = frame.f_locals
-
-            logger.debug(
-                f"[find_tool_loop_agent_runner] 检查帧 {frame_index}: {frame_info.function} at {frame_info.filename}:{frame_info.lineno}")
-
-            # 检查是否为实例方法（有 self 参数）
-            if 'self' in local_vars:
-                instance = local_vars['self']
-                if isinstance(instance, ToolLoopAgentRunner):
-                    logger.debug(f"[find_tool_loop_agent_runner] ✓ 在 self 中找到 ToolLoopAgentRunner 实例")
-                    return instance
-                else:
-                    logger.debug(f"[find_tool_loop_agent_runner]   self 类型为: {type(instance)}")
-
-            # 检查局部变量
-            for var_name, var_value in local_vars.items():
-                if var_name not in ['self', '__class__'] and isinstance(var_value, ToolLoopAgentRunner):
-                    logger.debug(f"[find_tool_loop_agent_runner] ✓ 在变量 {var_name} 中找到 ToolLoopAgentRunner 实例")
-                    return var_value
-
-            frame = frame.f_back
-            frame_index += 1
-
-        logger.debug("[find_tool_loop_agent_runner] 未找到 ToolLoopAgentRunner 实例")
-        return None
-
-    finally:
-        # 清理帧引用
-        del current_frame
-        if 'frame' in locals():
-            del frame

@@ -4,12 +4,10 @@ from astrbot.api import logger
 
 from .dataclasses import HTTPRequestData
 from .constants import HTTP_MESSAGE_TYPE, HTTP_EVENT_TYPE
-from .tool import BMC2Text, find_tool_loop_agent_runner_with_stack_info
-from astrbot.core.message.message_event_result import MessageEventResult
+from .tool import BMC2Text
 
 from collections.abc import AsyncGenerator
 import asyncio
-import json
 
 # ==================== HTTP 消息事件类 ====================
 class HTTPMessageEvent(AstrMessageEvent):

@@ -1,20 +1,7 @@
 import time
-from typing import Any, Dict, List, Optional
-from .constants import HTTP_MESSAGE_TYPE, HTTP_EVENT_TYPE, HTTP_STATUS_CODE
-from .dataclasses import HTTPRequestData, PendingResponse, SessionStats, AdapterStats
-from astrbot.api.message_components import Plain
-import asyncio
-import uuid
+from typing import Optional
+from .dataclasses import SessionStats
 from astrbot.api import logger
-from astrbot.api.platform import (
-    AstrBotMessage,
-    MessageMember,
-    MessageType,
-    Platform,
-    PlatformMetadata,
-    register_platform_adapter,
-)
-import json
 
 # ==================== HTTP 会话类 ====================
 class HTTPSession:

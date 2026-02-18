@@ -10,12 +10,12 @@ AstrBot HTTP Adapter 示例程序
 3. 完整的鉴权和安全控制
 """
 
-from astrbot.api.star import Context, Star, register
+from astrbot.api.star import Context, Star
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.core.config.default import CONFIG_METADATA_2
 from astrbot.api import logger
 from astrbot.api.platform import register_platform_adapter
-from astrbot.api.provider import ProviderRequest, LLMResponse
+from astrbot.api.provider import LLMResponse
 from .src.http_adapter import HTTPAdapter
 from .src.httpmessageevent import StandardHTTPMessageEvent, StreamHTTPMessageEvent
 
@@ -180,7 +180,8 @@ class HTTPAdapterPlugin(Star):
         self._unregister_config()
         logger.info("[HTTPAdapter] HTTP 适配器插件终止")
 
-    def register_416(self):
+    @staticmethod
+    def register_416():
         register_platform_adapter(
             "http_adapter",  # 适配器名称
             "HTTP/HTTPS 适配器 - 提供外部 HTTP 接口访问 AstrBot",  # 描述
@@ -336,7 +337,8 @@ class HTTPAdapterPlugin(Star):
             },
         )(HTTPAdapter)
 
-    def register_414(self):
+    @staticmethod
+    def register_414():
         register_platform_adapter(
             "http_adapter",  # 适配器名称
             "HTTP/HTTPS 适配器 - 提供外部 HTTP 接口访问 AstrBot",  # 描述
