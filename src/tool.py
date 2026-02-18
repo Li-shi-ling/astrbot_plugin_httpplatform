@@ -62,7 +62,7 @@ ComponentTypes = {
 # BMC类型转变为Text
 def BMC2Text(data: BaseMessageComponent) -> tuple[str, str]:
     """
-    将 BaseMessageComponent 对象转换为 JSON 字符串和类型字符串
+    将 BaseMessageComponent 对象转换为 Dict和类型字符串
 
     Args:
         data: BaseMessageComponent 对象

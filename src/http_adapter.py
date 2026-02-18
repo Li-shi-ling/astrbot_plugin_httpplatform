@@ -227,7 +227,8 @@ class HTTPAdapter(Platform):
 
             # 创建事件并提交
             event_id = str(uuid.uuid4())
-            future = asyncio.Future()
+            loop = asyncio.get_running_loop()
+            future = loop.create_future()
             self.pending_responses[event_id] = PendingResponse(
                 future=future,
                 session_id=session_id,

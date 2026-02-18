@@ -93,9 +93,9 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         # 处理消息链
         full_response = []
         for message in message_chain.chain:
-            response_text, text_type = BMC2Text(message)
+            response_json, text_type = BMC2Text(message)
             full_response.append({
-                "content": response_text,
+                "content": response_json,
                 "type": text_type
             })
 
