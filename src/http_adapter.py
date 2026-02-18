@@ -9,7 +9,7 @@ import asyncio
 import json
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from collections.abc import Coroutine
 
 from quart import Quart, request, jsonify, make_response
@@ -29,9 +29,8 @@ from astrbot.core.platform.astr_message_event import MessageSesion
 
 # 导入常量和数据类
 from .constants import HTTP_MESSAGE_TYPE, HTTP_STATUS_CODE
-from .dataclasses import HTTPRequestData, PendingResponse, AdapterStats
+from .dataclasses import HTTPRequestData, PendingResponse
 from .httpmessageevent import StandardHTTPMessageEvent, StreamHTTPMessageEvent
-from .httpsession import HTTPSession
 from .tool import Json2BMCChain
 
 # ==================== HTTP 适配器主类 ====================
@@ -64,7 +63,6 @@ class HTTPAdapter(Platform):
         self.total_errors = 0
 
         # 会话管理
-        self.sessions: Dict[str, HTTPSession] = {}
         self.pending_responses: Dict[str, PendingResponse] = {}
 
         # Quart 应用
@@ -128,7 +126,7 @@ class HTTPAdapter(Platform):
         @self.app.route('/<path:path>', methods=['OPTIONS'])
         async def options_handler(path):
             """处理所有 OPTIONS 预检请求"""
-            response = make_response('')
+            response = await make_response('')
             response.status_code = HTTP_STATUS_CODE["OK"]
 
             # quart-cors 会自动处理 CORS 头部，我们只需要返回空响应
@@ -141,7 +139,6 @@ class HTTPAdapter(Platform):
                 "status": "ok",
                 "service": "astrbot_http_adapter",
                 "timestamp": time.time(),
-                "sessions": len(self.sessions),
                 "pending_responses": len(self.pending_responses),
                 "version": "1.0.0"
             })
@@ -161,30 +158,6 @@ class HTTPAdapter(Platform):
             if request.method == 'OPTIONS':
                 return '', HTTP_STATUS_CODE["OK"]
             return await self._handle_http_stream_message(request)
-
-        # 会话管理接口
-        @self.app.route(f'{self.api_prefix}/sessions', methods=['GET', 'OPTIONS'])
-        async def list_sessions():
-            """获取所有活跃会话"""
-            if request.method == 'OPTIONS':
-                return '', HTTP_STATUS_CODE["OK"]
-            return await self._handle_list_sessions(request)
-
-        # 清理会话接口
-        @self.app.route(f'{self.api_prefix}/sessions/<session_id>', methods=['DELETE', 'OPTIONS'])
-        async def delete_session(session_id):
-            """删除指定会话"""
-            if request.method == 'OPTIONS':
-                return '', HTTP_STATUS_CODE["OK"]
-            return await self._handle_delete_session(request, session_id)
-
-        # 统计信息接口
-        @self.app.route(f'{self.api_prefix}/stats', methods=['GET', 'OPTIONS'])
-        async def get_stats():
-            """获取统计信息"""
-            if request.method == 'OPTIONS':
-                return '', HTTP_STATUS_CODE["OK"]
-            return await self._handle_get_stats(request)
 
     async def _handle_http_message(self, request_obj) -> Any:
         """处理 HTTP 消息请求"""
@@ -485,101 +458,6 @@ class HTTPAdapter(Platform):
             logger.error(f"[HTTPAdapter] 处理流式请求时出错: {e}", exc_info=True)
             return jsonify({"error": f"内部服务器错误: {str(e)}"}), HTTP_STATUS_CODE["INTERNAL_ERROR"]
 
-    async def _handle_list_sessions(self, request_obj) -> Any:
-        """处理获取会话列表请求"""
-        # 鉴权
-        auth_result = await self._check_auth(request_obj)
-        if auth_result is not None:
-            return auth_result
-
-        sessions = []
-        for session_id, session in self.sessions.items():
-            sessions.append(session.get_stats().__dict__)
-
-        return jsonify({
-            "sessions": sessions,
-            "total": len(sessions),
-            "timestamp": time.time()
-        })
-
-    async def _handle_delete_session(self, request_obj, session_id: str) -> Any:
-        """处理删除会话请求"""
-        # 鉴权
-        auth_result = await self._check_auth(request_obj)
-        if auth_result is not None:
-            return auth_result
-
-        if session_id in self.sessions:
-            session = self.sessions.pop(session_id)
-            await session.close("管理员删除")
-            return jsonify({
-                "success": True,
-                "message": f"会话 {session_id} 已删除",
-                "session_id": session_id
-            })
-        else:
-            return jsonify({
-                "error": f"会话 {session_id} 不存在"
-            }), HTTP_STATUS_CODE["NOT_FOUND"]
-
-    async def _handle_get_stats(self, request_obj) -> Any:
-        """处理获取统计信息请求"""
-        # 鉴权
-        auth_result = await self._check_auth(request_obj)
-        if auth_result is not None:
-            return auth_result
-
-        # 清理过期的待处理响应
-        expired_responses = self._cleanup_expired_responses()
-
-        # 清理超时会话
-        expired_sessions = self._cleanup_expired_sessions()
-
-        # 构建统计信息
-        stats = AdapterStats(
-            timestamp=time.time(),
-            sessions_active=len(self.sessions),
-            sessions_max_limit=self.max_sessions,
-            sessions_expired=len(expired_sessions),
-            pending_responses_active=len(self.pending_responses),
-            pending_responses_expired=len(expired_responses),
-            total_requests_processed=self.total_requests_processed,
-            total_errors=self.total_errors
-        )
-
-        return jsonify(stats.__dict__)
-
-    def _cleanup_expired_responses(self) -> List[str]:
-        """清理过期的待处理响应"""
-        expired_responses = []
-        current_time = time.time()
-
-        for event_id, pending in list(self.pending_responses.items()):
-            if current_time - pending.created_at > pending.timeout:
-                expired_responses.append(event_id)
-                if not pending.future.done():
-                    pending.future.set_exception(asyncio.TimeoutError("响应超时"))
-
-        for event_id in expired_responses:
-            self.pending_responses.pop(event_id, None)
-
-        return expired_responses
-
-    def _cleanup_expired_sessions(self) -> List[str]:
-        """清理超时会话"""
-        expired_sessions = []
-        current_time = time.time()
-
-        for session_id, session in list(self.sessions.items()):
-            if current_time - session.last_active > self.session_timeout:
-                expired_sessions.append(session_id)
-
-        for session_id in expired_sessions:
-            session = self.sessions.pop(session_id)
-            self._start_task(session.close("会话超时自动清理"))
-
-        return expired_sessions
-
     async def _check_auth(self, request_obj) -> Optional[Any]:
         """检查鉴权"""
         if not self.auth_token:
@@ -621,9 +499,6 @@ class HTTPAdapter(Platform):
 
         self._running = True
 
-        # 启动清理任务
-        self._cleanup_task = asyncio.create_task(self._cleanup_loop())
-
         try:
             # 导入 quart 的运行函数
             import hypercorn.asyncio
@@ -648,24 +523,6 @@ class HTTPAdapter(Platform):
                     await self._cleanup_task
                 except asyncio.CancelledError:
                     pass
-
-    async def _cleanup_loop(self):
-        """清理循环，定期清理过期资源"""
-        while self._running:
-            try:
-                await asyncio.sleep(60)  # 每分钟清理一次
-
-                # 清理过期资源
-                expired_responses = self._cleanup_expired_responses()
-                expired_sessions = self._cleanup_expired_sessions()
-
-                if expired_sessions or expired_responses:
-                    logger.debug(f"[HTTPAdapter] 清理完成: {len(expired_sessions)} 会话, {len(expired_responses)} 响应")
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"[HTTPAdapter] 清理循环出错: {e}")
 
     async def terminate(self):
         """终止适配器并清理所有资源"""
@@ -698,20 +555,6 @@ class HTTPAdapter(Platform):
                 logger.error(f"[HTTPAdapter] 清理任务关闭异常: {e}", exc_info=True)
 
             self._cleanup_task = None
-
-        # 关闭所有活跃会话（关键修复）
-        if self.sessions:
-            logger.info(f"[HTTPAdapter] 正在关闭 {len(self.sessions)} 个会话")
-
-            await asyncio.gather(
-                *(
-                    session.close("适配器终止")
-                    for session in self.sessions.values()
-                ),
-                return_exceptions=True
-            )
-
-            self.sessions.clear()
 
         # 取消所有等待中的响应
         if self.pending_responses:

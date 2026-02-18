@@ -360,9 +360,9 @@ class HTTPAdapterPlugin(Star):
     async def http(self, event: AstrMessageEvent):
         pass
 
-    @http.command("ghp")
+    @http.command("获取实例")
     async def inithttpadapter(self, event: AstrMessageEvent):
-        """获取所有HTTPAdapter实例到内存"""
+        """获取所有HTTPAdapter实例并返回"""
         self.httpadapter = {}
         for platform in self.context.platform_manager.platform_insts:
             if isinstance(platform, self._http_adapter_cls):
