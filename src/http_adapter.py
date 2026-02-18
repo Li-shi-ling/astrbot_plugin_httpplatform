@@ -217,7 +217,7 @@ class HTTPAdapter(Platform):
             if not message:
                 return jsonify({"error": "message 参数是必需的"}), HTTP_STATUS_CODE["BAD_REQUEST"]
             messages = None
-            if isinstance(message, List):
+            if isinstance(message, list):
                 messages = Json2BMCChain(message)
             # 获取会话ID或创建新的
             platform = data.get('platform', "")
@@ -327,7 +327,7 @@ class HTTPAdapter(Platform):
             if not message:
                 return jsonify({"error": "message 参数是必需的"}), HTTP_STATUS_CODE["BAD_REQUEST"]
             messages = []
-            if isinstance(message, List):
+            if isinstance(message, list):
                 messages = Json2BMCChain(message)
             # 收集请求头信息
             headers = dict(request_obj.headers)
