@@ -80,7 +80,6 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
 
     def __init__(self, message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data):
         super().__init__(message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data)
-        self._pending_response = None  # 保存待处理响应
         self._cached_response = None  # 缓存完整的响应数据
         self._finalcall = False
 
@@ -148,8 +147,6 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         pending = None
         if self.event_id in self._adapter.pending_responses:
             pending = self._adapter.pending_responses.pop(self.event_id)
-        elif self._pending_response:
-            pending = self._pending_response
 
         # 设置响应结果
         if pending and not pending.future.done():
