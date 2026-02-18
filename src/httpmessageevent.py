@@ -155,7 +155,7 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
 
         # 设置响应结果
         if pending and not pending.future.done():
-            result_json = json.dumps(self._cached_response, ensure_ascii=False)
+            result_json =self._cached_response, ensure_ascii=False
             pending.future.set_result(result_json)
 
             logger.debug(f"[StandardHTTPMessageEvent] 已发送响应 (event_id: {self.event_id}, 消息数: {len(self._cached_response)})")
