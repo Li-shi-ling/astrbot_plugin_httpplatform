@@ -207,7 +207,7 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
         流式发送消息到客户端
 
         这个方法会实时地将生成器产生的每个消息块发送给客户端，
-        保持流式传输的特性。**不发送结束信号**，结束信号由 on_llm_response 统一处理。
+        保持流式传输的特性。
         """
         try:
             # 标记开始流式传输
@@ -295,7 +295,7 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
                     break
 
     def get_has_send_oper(self):
-        return self._has_send_oper
+        return getattr(self, "_has_send_oper", False)
 
     async def _safe_put(self, item: dict, timeout: float = 1.0):
         """安全入队，防止反压阻塞"""

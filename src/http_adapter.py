@@ -256,7 +256,11 @@ class HTTPAdapter(Platform):
                 timeout = data.get('timeout', 30)
                 if not isinstance(timeout, int):
                     logger.error(f"[HTTPAdapter] 不兼容的 timeout:{timeout} 尝试转变为 int")
-                    timeout = int(timeout)
+                    try:
+                        timeout = int(timeout)
+                    except:
+                        logger.error(f"[HTTPAdapter] 转变为 int 失败,使用 30")
+                        timeout = 30
                 if timeout < 0:
                     logger.error(f"[HTTPAdapter] timeout:{timeout} < 0 使用 30")
                     timeout = 30
@@ -279,7 +283,7 @@ class HTTPAdapter(Platform):
 
             except asyncio.TimeoutError:
                 if event_id in self.pending_responses:
-                    self.pending_responses.pop(event_id)
+                    self.pending_responses.pop(event_id, None)
                 return jsonify({
                     "error": "请求超时",
                     "event_id": event_id
@@ -296,7 +300,7 @@ class HTTPAdapter(Platform):
             return jsonify({"error": f"内部服务器错误: {str(e)}"}), HTTP_STATUS_CODE["INTERNAL_ERROR"]
         finally:
             if not event_id is None:
-                self.pending_responses.pop(event_id)
+                self.pending_responses.pop(event_id, None)
 
     async def _handle_http_stream_message(self, request_obj) -> Any:
         """处理 HTTP 流式消息请求 - 修复版，支持多条消息"""
@@ -385,6 +389,16 @@ class HTTPAdapter(Platform):
 
                 # 设置超时参数
                 timeout = data.get('timeout', 600)  # 增加到10分钟，支持长对话
+                if not isinstance(timeout, int):
+                    logger.error(f"[HTTPAdapter] 不兼容的 timeout:{timeout} 尝试转变为 int")
+                    try:
+                        timeout = int(timeout)
+                    except:
+                        logger.error(f"[HTTPAdapter] 转变为 int 失败,使用 600")
+                        timeout = 600
+                if timeout < 0:
+                    logger.error(f"[HTTPAdapter] timeout:{timeout} < 0 使用 600")
+                    timeout = 600
                 start_time = time.time()
                 last_activity_time = time.time()
                 received_end_event = False
@@ -451,8 +465,8 @@ class HTTPAdapter(Platform):
                     # 通知事件停止生成
                     try:
                         queue.put_nowait(None)
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.error(f"[HTTPAdapter] SSE发送结束信号时错误: {e}", exc_info=True)
                     if hasattr(event, "_is_streaming"):
                         event._is_streaming = False
                     logger.info(f"[HTTPAdapter] SSE连接结束: {event_id}, 会话: {session_id}")
@@ -499,7 +513,7 @@ class HTTPAdapter(Platform):
     ):
         """通过会话发送消息"""
         # 对于 HTTP 适配器，这个功能由事件处理器处理
-        pass
+        raise NotImplementedError
 
     def run(self) -> Coroutine[Any, Any, None]:
         """运行 HTTP 服务器"""
