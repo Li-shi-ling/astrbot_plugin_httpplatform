@@ -404,10 +404,6 @@ class HTTPAdapter(Platform):
 
                 try:
                     while not received_end_event:
-                        # 客户端断连检测
-                        if await request.is_disconnected():
-                            logger.info(f"[HTTPAdapter] 客户端断连: {event_id}")
-                            break
                         # 检查总超时
                         current_time = time.time()
                         if current_time - start_time > timeout:
