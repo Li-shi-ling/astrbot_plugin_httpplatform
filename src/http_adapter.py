@@ -408,7 +408,10 @@ class HTTPAdapter(Platform):
                         # 检查总超时
                         current_time = time.time()
                         if current_time - start_time > timeout:
-                            yield f"event: {HTTP_MESSAGE_TYPE['TIMEOUT']}\ndata: {{'reason': 'total_timeout', 'duration': current_time - start_time}}\n\n"
+                            yield (
+                                f"event: {HTTP_MESSAGE_TYPE['TIMEOUT']}\n"
+                                f"data: {json.dumps({'reason': 'total_timeout', 'duration': current_time - start_time})}\n\n"
+                            )
                             break
 
                         # 检查活动超时（60秒无活动发送心跳）
@@ -423,7 +426,10 @@ class HTTPAdapter(Platform):
 
                             if item is None:
                                 # None 是特殊的结束信号
-                                yield f"event: {HTTP_MESSAGE_TYPE['END']}\ndata: {{'reason': 'normal_end'}}\n\n"
+                                yield (
+                                    f"event: {HTTP_MESSAGE_TYPE['END']}\n"
+                                    f"data: {json.dumps({'reason': 'normal_end'})}\n\n"
+                                )
                                 received_end_event = True
                                 break
 
@@ -609,7 +615,6 @@ class HTTPAdapter(Platform):
         logger.info(f"[HTTPAdapter] CORS 来源: {self.cors_origins}")
 
         self._running = True
-        server_task = None
 
         # 启动清理任务
         self._cleanup_task = asyncio.create_task(self._cleanup_loop())
@@ -636,13 +641,6 @@ class HTTPAdapter(Platform):
                 self._cleanup_task.cancel()
                 try:
                     await self._cleanup_task
-                except asyncio.CancelledError:
-                    pass
-            # 确保服务器任务被取消
-            if server_task:
-                server_task.cancel()
-                try:
-                    await server_task
                 except asyncio.CancelledError:
                     pass
 
