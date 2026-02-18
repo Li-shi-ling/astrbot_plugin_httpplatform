@@ -1,7 +1,6 @@
 """
 HTTP 适配器数据类定义
 """
-import json
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
@@ -27,15 +26,13 @@ class HTTPResponseData:
     body: Any
     timestamp: float = field(default_factory=time.time)
 
-
 @dataclass
 class PendingResponse:
     """待处理响应"""
-    future: asyncio.Future
+    future: asyncio.Future[Any]
     created_at: float = field(default_factory=time.time)
     timeout: int = 30
     session_id: Optional[str] = None
-
 
 @dataclass
 class SessionStats:
@@ -49,7 +46,6 @@ class SessionStats:
     client_ip: Optional[str] = None
     user_agent: Optional[str] = None
     is_active: bool = True
-
 
 @dataclass
 class AdapterStats:

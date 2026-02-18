@@ -1,20 +1,7 @@
 import time
-from typing import Any, Dict, List, Optional
-from .constants import HTTP_MESSAGE_TYPE, HTTP_EVENT_TYPE, HTTP_STATUS_CODE
-from .dataclasses import HTTPRequestData, PendingResponse, SessionStats, AdapterStats
-from astrbot.api.message_components import Plain
-import asyncio
-import uuid
-from astrbot import logger
-from astrbot.api.platform import (
-    AstrBotMessage,
-    MessageMember,
-    MessageType,
-    Platform,
-    PlatformMetadata,
-    register_platform_adapter,
-)
-import json
+from typing import Optional
+from .dataclasses import SessionStats
+from astrbot.api import logger
 
 # ==================== HTTP 会话类 ====================
 class HTTPSession:
@@ -30,6 +17,17 @@ class HTTPSession:
         self.message_count = 0
         self.user_id: Optional[str] = None
         self.username: Optional[str] = None
+        self._is_closed = False
+
+    def update_activity(self):
+        """更新会话活动时间"""
+        if not self._is_closed:
+            self.last_active = time.time()
+            self.message_count += 1
+
+    def is_closed(self) -> bool:
+        """检查会话是否已关闭"""
+        return self._is_closed
 
     def is_active(self) -> bool:
         """检查会话是否活跃"""
@@ -38,6 +36,10 @@ class HTTPSession:
     async def close(self, reason: str = "正常关闭"):
         """关闭会话"""
         logger.info(f"[HTTPAdapter] 会话关闭: {self.session_id}, 原因: {reason}")
+        # 更新会话状态为已关闭
+        self._is_closed = True
+        self.last_active = time.time()
+        # 可以添加其他清理逻辑，如释放资源等
 
     def get_stats(self) -> SessionStats:
         """获取会话统计信息"""

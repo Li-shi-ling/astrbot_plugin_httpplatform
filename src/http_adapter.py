@@ -15,7 +15,7 @@ from collections.abc import Coroutine
 from quart import Quart, request, jsonify, make_response
 from quart_cors import cors
 
-from astrbot import logger
+from astrbot.api import logger
 from astrbot.api.event import MessageChain
 from astrbot.api.message_components import Plain
 from astrbot.api.platform import (
@@ -217,7 +217,7 @@ class HTTPAdapter(Platform):
             if not message:
                 return jsonify({"error": "message 参数是必需的"}), HTTP_STATUS_CODE["BAD_REQUEST"]
             messages = None
-            if isinstance(message, List):
+            if isinstance(message, list):
                 messages = Json2BMCChain(message)
             # 获取会话ID或创建新的
             platform = data.get('platform', "")
@@ -227,7 +227,8 @@ class HTTPAdapter(Platform):
 
             # 创建事件并提交
             event_id = str(uuid.uuid4())
-            future = asyncio.Future()
+            loop = asyncio.get_running_loop()
+            future = loop.create_future()
             self.pending_responses[event_id] = PendingResponse(
                 future=future,
                 session_id=session_id,
@@ -326,8 +327,8 @@ class HTTPAdapter(Platform):
             message = data.get('message')
             if not message:
                 return jsonify({"error": "message 参数是必需的"}), HTTP_STATUS_CODE["BAD_REQUEST"]
-            messages = []
-            if isinstance(message, List):
+            messages = None
+            if isinstance(message, list):
                 messages = Json2BMCChain(message)
             # 收集请求头信息
             headers = dict(request_obj.headers)
@@ -407,7 +408,7 @@ class HTTPAdapter(Platform):
                         # 检查总超时
                         current_time = time.time()
                         if current_time - start_time > timeout:
-                            yield f"event: {HTTP_MESSAGE_TYPE['TIMEOUT']}\ndata: {{'reason': 'total_timeout', 'duration': current_time - start_time}}\n\n"
+                            yield f"event: {HTTP_MESSAGE_TYPE['TIMEOUT']}\ndata: {json.dumps({'reason': 'total_timeout', 'duration': current_time - start_time})}\n\n"
                             break
 
                         # 检查活动超时（60秒无活动发送心跳）
@@ -422,7 +423,7 @@ class HTTPAdapter(Platform):
 
                             if item is None:
                                 # None 是特殊的结束信号
-                                yield f"event: {HTTP_MESSAGE_TYPE['END']}\ndata: {{'reason': 'normal_end'}}\n\n"
+                                yield f"event: {HTTP_MESSAGE_TYPE['END']}\ndata: {json.dumps({'reason': 'normal_end'})}\n\n"
                                 received_end_event = True
                                 break
 
@@ -564,7 +565,7 @@ class HTTPAdapter(Platform):
 
         for session_id in expired_sessions:
             session = self.sessions.pop(session_id)
-            asyncio.create_task(session.close("会话超时自动清理"))
+            self._start_task(session.close("会话超时自动清理"))
 
         return expired_sessions
 
@@ -608,7 +609,6 @@ class HTTPAdapter(Platform):
         logger.info(f"[HTTPAdapter] CORS 来源: {self.cors_origins}")
 
         self._running = True
-        server_task = None
 
         # 启动清理任务
         self._cleanup_task = asyncio.create_task(self._cleanup_loop())
@@ -635,13 +635,6 @@ class HTTPAdapter(Platform):
                 self._cleanup_task.cancel()
                 try:
                     await self._cleanup_task
-                except asyncio.CancelledError:
-                    pass
-            # 确保服务器任务被取消
-            if server_task:
-                server_task.cancel()
-                try:
-                    await server_task
                 except asyncio.CancelledError:
                     pass
 
@@ -681,7 +674,7 @@ class HTTPAdapter(Platform):
         for event_id in list(self.pending_responses.keys()):
             pending = self.pending_responses.pop(event_id, None)
             if pending and not pending.future.done():
-                pending.future.set_exception(asyncio.CancelledError())
+                pending.future.set_exception(asyncio.CancelledError("适配器终止"))
 
         # 取消清理任务
         if self._cleanup_task:
@@ -691,13 +684,10 @@ class HTTPAdapter(Platform):
             except asyncio.CancelledError:
                 pass
         
-        # 取消所有等待的响应
-        for event_id, pending in list(self.pending_responses.items()):
-            if not pending.future.done():
-                pending.future.set_exception(asyncio.CancelledError("适配器终止"))
-
+        # 清理会话，确保每个会话都被正确关闭
+        for session_id, session in list(self.sessions.items()):
+            await session.close("适配器终止")
         self.sessions.clear()
         self.pending_responses.clear()
         await super().terminate()
         logger.info("[HTTPAdapter] 适配器已终止")
-
