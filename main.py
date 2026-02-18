@@ -59,7 +59,7 @@ class HTTPAdapterPlugin(Star):
         },
         "auth_token": {
             "description": "鉴权令牌",
-            "type": "password",
+            "type": "string",
             "hint": "用于 API 访问的 Bearer Token，留空表示不启用鉴权",
             "default": ""
         },
@@ -80,18 +80,6 @@ class HTTPAdapterPlugin(Star):
             "type": "int",
             "hint": "HTTP 请求超时时间（秒），默认 30",
             "default": 30
-        },
-        "session_timeout": {
-            "description": "会话超时时间",
-            "type": "int",
-            "hint": "会话超时时间（秒），默认 3600（1小时）",
-            "default": 3600
-        },
-        "max_sessions": {
-            "description": "最大会话数",
-            "type": "int",
-            "hint": "最大同时连接的会话数，默认 1000",
-            "default": 1000
         }
     }
 
@@ -331,7 +319,7 @@ class HTTPAdapterPlugin(Star):
         pass
 
     @http.command("获取实例")
-    async def inithttpadapter(self, event: AstrMessageEvent):
+    async def init_http_adapter(self, event: AstrMessageEvent):
         """获取所有HTTPAdapter实例并返回"""
         self.httpadapter = {}
         for platform in self.context.platform_manager.platform_insts:

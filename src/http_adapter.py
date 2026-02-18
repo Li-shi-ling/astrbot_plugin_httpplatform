@@ -12,6 +12,7 @@ import uuid
 from typing import Any, Dict, Optional
 from collections.abc import Coroutine
 
+import hmac
 from quart import Quart, request, jsonify, make_response
 from quart_cors import cors
 
@@ -88,8 +89,6 @@ class HTTPAdapter(Platform):
 
         # 运行状态
         self._running = False
-        self._server_task: Optional[asyncio.Task] = None
-        self._cleanup_task: Optional[asyncio.Task] = None
 
         # 平台元数据
         platform_id = platform_config.get("id", "http_adapter_default")
@@ -222,7 +221,7 @@ class HTTPAdapter(Platform):
                 abm.message = [Plain(text=message)]
             else:
                 abm.message = messages
-            abm.message_str = message
+            abm.message_str = message if isinstance(message, str) else json.dumps(message, ensure_ascii=False)
             abm.raw_message = data
             abm.timestamp = int(time.time())
 
@@ -469,7 +468,9 @@ class HTTPAdapter(Platform):
             return jsonify({"error": "未授权访问"}), HTTP_STATUS_CODE["UNAUTHORIZED"]
 
         token = auth_header[7:]
-        if token != self.auth_token:
+
+        # 使用 hmac.compare_digest 进行安全的字符串比较
+        if not hmac.compare_digest(token, self.auth_token):
             return jsonify({"error": "无效的令牌"}), HTTP_STATUS_CODE["UNAUTHORIZED"]
 
         return None
@@ -517,13 +518,6 @@ class HTTPAdapter(Platform):
         except Exception as e:
             logger.error(f"[HTTPAdapter] HTTP 服务器启动失败: {e}", exc_info=True)
             self._running = False
-        finally:
-            if self._cleanup_task:
-                self._cleanup_task.cancel()
-                try:
-                    await self._cleanup_task
-                except asyncio.CancelledError:
-                    pass
 
     async def terminate(self):
         """终止适配器并清理所有资源"""
@@ -544,18 +538,6 @@ class HTTPAdapter(Platform):
             )
 
             self._background_tasks.clear()
-
-        # 取消清理循环任务
-        if self._cleanup_task:
-            self._cleanup_task.cancel()
-            try:
-                await self._cleanup_task
-            except asyncio.CancelledError:
-                pass
-            except Exception as e:
-                logger.error(f"[HTTPAdapter] 清理任务关闭异常: {e}", exc_info=True)
-
-            self._cleanup_task = None
 
         # 取消所有等待中的响应
         if self.pending_responses:

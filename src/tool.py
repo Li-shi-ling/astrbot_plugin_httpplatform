@@ -27,9 +27,10 @@ from astrbot.api.message_components import (
 import json
 from typing import Dict, Any, List
 from astrbot.api import logger
+import inspect
 
-# 已有的 ComponentTypes 映射
-ComponentTypes = {
+# 已有的 COMPONENT_TYPES 映射
+COMPONENT_TYPES = {
     # Basic Message Segments
     "plain": Plain,
     "text": Plain,
@@ -71,8 +72,6 @@ def BMC2Dict(data: BaseMessageComponent) -> tuple[dict[Any,Any], str]:
     return data.toDict(), str(data.type)
 
 # Dict类列表转变为BMC
-import inspect
-
 def Json2BMC(data: Dict[str, Any]) -> BaseMessageComponent:
     """
     将字典格式的消息数据转换为对应的 BaseMessageComponent 对象
@@ -86,7 +85,7 @@ def Json2BMC(data: Dict[str, Any]) -> BaseMessageComponent:
         logger.info(f"[Json2BMC] 未获取到data_type,data:{data_text}")
         return Plain(text=data_text)
 
-    component_class = ComponentTypes.get(data_type.lower())
+    component_class = COMPONENT_TYPES.get(data_type.lower())
 
     # 未知类型
     if component_class is None:

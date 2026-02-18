@@ -80,7 +80,7 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
 
     def __init__(self, message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data):
         super().__init__(message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data)
-        self._cached_response = None  # 缓存完整的响应数据
+        self._cached_response = []  # 缓存完整的响应数据
         self._finalcall = False
 
     async def send(self, message_chain: MessageChain):
@@ -101,7 +101,7 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
             full_response = []
 
         # 缓存完整的响应数据
-        self._cached_response = full_response
+        self._cached_response.extend(full_response)
         logger.debug(f"[StandardHTTPMessageEvent] 已缓存响应数据 (event_id: {self.event_id}, 消息数: {len(full_response)})")
 
         if self._finalcall:
@@ -220,7 +220,6 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             # 注意：这里不再发送 END 信号，只标记内部完成
             self._is_streaming = False
             self._stream_complete.set()
-            self._finalcall = True
 
         except Exception as e:
             logger.error(f"[StreamHTTPMessageEvent] 流式发送时出错: {e}")
@@ -293,7 +292,7 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
                     # 队列持续满，停止生成
                     self._is_streaming = False
                     break
-        return False
+        return True
 
     def get_has_send_oper(self):
         return self._has_send_oper
