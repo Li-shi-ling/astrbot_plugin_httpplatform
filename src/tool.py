@@ -58,7 +58,7 @@ ComponentTypes = {
 }
 
 # BMC类型转变为Text
-def BMC2Dict(data: BaseMessageComponent) -> tuple[str, str]:
+def BMC2Dict(data: BaseMessageComponent) -> tuple[dict[Any,Any], str]:
     """
     将 BaseMessageComponent 对象转换为 Dict和类型字符串
 

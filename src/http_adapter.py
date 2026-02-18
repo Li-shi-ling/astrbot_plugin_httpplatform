@@ -133,6 +133,9 @@ class HTTPAdapter(Platform):
         # 健康检查
         @self.app.route(f'{self.api_prefix}/health', methods=['GET'])
         async def health_check():
+            auth_result = await self._check_auth(request)
+            if auth_result is not None:
+                return auth_result
             return jsonify({
                 "status": "ok",
                 "service": "astrbot_http_adapter",
