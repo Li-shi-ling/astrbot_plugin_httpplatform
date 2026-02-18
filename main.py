@@ -194,8 +194,6 @@ class HTTPAdapterPlugin(Star):
                 "cors_origins": "*",
                 "max_request_size": 10485760,  # 10MB
                 "request_timeout": 30,
-                "session_timeout": 3600,  # 会话超时时间(秒)
-                "max_sessions": 1000,  # 最大会话数
             },
             i18n_resources={
                 "zh-CN": {
@@ -230,15 +228,7 @@ class HTTPAdapterPlugin(Star):
                     "request_timeout": {
                         "description": "请求超时时间 (s)",
                         "hint": "HTTP 请求处理超时时间，单位秒",
-                    },
-                    "session_timeout": {
-                        "description": "会话超时时间 (s)",
-                        "hint": "会话保持的最长时间，超过此时间未活动的会话将被清理",
-                    },
-                    "max_sessions": {
-                        "description": "最大会话数",
-                        "hint": "同时保持的最大会话数量",
-                    },
+                    }
                 },
                 "en-US": {
                     "http_host": {
@@ -272,15 +262,7 @@ class HTTPAdapterPlugin(Star):
                     "request_timeout": {
                         "description": "Request timeout (s)",
                         "hint": "HTTP request processing timeout in seconds",
-                    },
-                    "session_timeout": {
-                        "description": "Session timeout (s)",
-                        "hint": "Maximum session idle time before cleanup",
-                    },
-                    "max_sessions": {
-                        "description": "Max sessions",
-                        "hint": "Maximum number of concurrent sessions",
-                    },
+                    }
                 },
             },
             config_metadata={
@@ -323,17 +305,7 @@ class HTTPAdapterPlugin(Star):
                     "description": "请求超时时间 (s)",
                     "type": "int",
                     "hint": "HTTP 请求处理超时时间，单位秒",
-                },
-                "session_timeout": {
-                    "description": "会话超时时间 (s)",
-                    "type": "int",
-                    "hint": "会话保持的最长时间，超过此时间未活动的会话将被清理",
-                },
-                "max_sessions": {
-                    "description": "最大会话数",
-                    "type": "int",
-                    "hint": "同时保持的最大会话数量",
-                },
+                }
             },
         )(HTTPAdapter)
 
@@ -351,8 +323,6 @@ class HTTPAdapterPlugin(Star):
                 "cors_origins": "*",
                 "max_request_size": 10485760,  # 10MB
                 "request_timeout": 30,
-                "session_timeout": 3600,  # 会话超时时间(秒)
-                "max_sessions": 1000,  # 最大会话数
             }
         )(HTTPAdapter)
 

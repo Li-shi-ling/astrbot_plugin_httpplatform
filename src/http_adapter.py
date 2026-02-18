@@ -55,8 +55,6 @@ class HTTPAdapter(Platform):
         self.enable_http_api = platform_config.get("enable_http_api", True)
         self.auth_token = platform_config.get("auth_token", "")
         self.cors_origins = platform_config.get("cors_origins", "*").split(",")
-        self.session_timeout = int(platform_config.get("session_timeout", 3600))
-        self.max_sessions = int(platform_config.get("max_sessions", 1000))
 
         # 统计信息
         self.total_requests_processed = 0
