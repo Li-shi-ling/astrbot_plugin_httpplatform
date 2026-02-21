@@ -309,6 +309,7 @@ fetch("http://localhost:8080/api/v1/messages", {
 * lishining
 * GitHub:
   [https://github.com/Li-shi-ling/astrbot_plugin_httpplatform](https://github.com/Li-shi-ling/astrbot_plugin_httpplatform)
+* QQ群: 1083090761
 
 ---
 
