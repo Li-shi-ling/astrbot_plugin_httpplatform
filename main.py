@@ -306,7 +306,6 @@ class HTTPAdapterPlugin(Star):
         # 处理流式HTTP消息事件 - 统一发送结束信号
         elif isinstance(event, StreamHTTPMessageEvent):
             logger.debug(f"[HTTPAdapter] 进入LLM调用结束阶段 StreamHTTPMessageEvent 已发送结束信号 (event_id: {event.event_id})")
-
             event.set_final_call()
 
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE, priority=-999999)
