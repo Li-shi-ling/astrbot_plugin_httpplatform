@@ -216,7 +216,8 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
 
             # 流式发送每个消息块
             await self.queue_put_generator(generator)
-            self._finalcall = True
+            # self._finalcall = True
+            logger.debug("[StreamHTTPMessageEvent] [send_streaming] 调用一次")
 
             # 注意：这里不再发送 END 信号，只标记内部完成
             self._is_streaming = False
@@ -278,6 +279,7 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
     def set_final_call(self):
         logger.debug("[StreamHTTPMessageEvent] 调用 set_final_call 函数")
         self._finalcall = True
+
 
     async def queue_put_generator(self, generator):
         async for message_chain in generator:

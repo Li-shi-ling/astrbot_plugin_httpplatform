@@ -296,6 +296,7 @@ class HTTPAdapterPlugin(Star):
     @filter.on_llm_response()
     async def on_llm_response(self, event: AstrMessageEvent, req: LLMResponse):
         """在LLM响应后，处理消息的结束"""
+        logger.debug(f"[HTTPAdapter] [on_llm_response] role:{req.role}")
         if not req.role == "assistant":
             return
 
