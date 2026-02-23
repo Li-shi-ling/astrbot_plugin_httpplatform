@@ -301,13 +301,13 @@ class HTTPAdapterPlugin(Star):
 
         # 处理标准HTTP消息事件 - 统一发送缓存的响应
         if isinstance(event, StandardHTTPMessageEvent):
+            logger.debug(f"[HTTPAdapter] 进入LLM调用结束阶段 StandardHTTPMessageEvent 已发送响应 (event_id: {event.event_id})")
             event.set_final_call()
-            logger.debug(f"[on_llm_response] StandardHTTPMessageEvent 已发送响应 (event_id: {event.event_id})")
-
         # 处理流式HTTP消息事件 - 统一发送结束信号
         elif isinstance(event, StreamHTTPMessageEvent):
+            logger.debug(f"[HTTPAdapter] 进入LLM调用结束阶段 StreamHTTPMessageEvent 已发送结束信号 (event_id: {event.event_id})")
+
             event.set_final_call()
-            logger.debug(f"[on_llm_response] StreamHTTPMessageEvent 已发送结束信号 (event_id: {event.event_id})")
 
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE, priority=-999999)
     async def other_message(self, event: AstrMessageEvent):
@@ -318,6 +318,7 @@ class HTTPAdapterPlugin(Star):
                     and event.is_at_or_wake_command
                     and not event.call_llm
             ):
+                logger.debug(f"[HTTPAdapter] 在插件调用结束阶段进行结束 StandardHTTPMessageEvent 已发送响应 (event_id: {event.event_id})")
                 await event.send_response()
         elif isinstance(event, StreamHTTPMessageEvent):
             if not (
@@ -325,4 +326,5 @@ class HTTPAdapterPlugin(Star):
                     and event.is_at_or_wake_command
                     and not event.call_llm
             ):
+                logger.debug(f"[HTTPAdapter] 在插件调用结束阶段进行结束 StreamHTTPMessageEvent 已发送结束信号 (event_id: {event.event_id})")
                 await event.send_end_signal()
