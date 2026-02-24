@@ -178,10 +178,6 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
 
     async def send(self, message_chain: MessageChain):
         """发送完整响应 - 用于非流式输出"""
-        # 如果正在流式传输，需要先结束流式
-        if self._is_streaming:
-            await self._end_streaming()
-
         # 发送完整消息（这将发送多条消息，但不会发送结束信号）
         for message in message_chain.chain:
             response_text, text_type = BMC2Dict(message)
@@ -191,7 +187,6 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
                 "text_type": text_type
             })
             if not success:
-                self._is_streaming = False
                 break
 
         if self._finalcall:
