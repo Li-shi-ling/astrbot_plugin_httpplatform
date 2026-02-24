@@ -103,6 +103,7 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         # 缓存完整的响应数据
         self._cached_response.extend(full_response)
         logger.debug(f"[StandardHTTPMessageEvent] 已缓存响应数据 (event_id: {self.event_id}, 消息数: {len(full_response)})")
+
         if self._finalcall:
             await self.send_response()
             self._finalcall = False
@@ -157,7 +158,6 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
             logger.warning(f"[StandardHTTPMessageEvent] 没有找到待处理响应: event_id={self.event_id}")
 
     def set_final_call(self):
-
         self._finalcall = True
 
     def get_has_send_oper(self):
@@ -193,7 +193,7 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             if not success:
                 self._is_streaming = False
                 break
-        logger.debug(f"[StreamHTTPMessageEvent] [send] self._finalcall:{self._finalcall}")
+
         if self._finalcall:
             await self.send_end_signal()
             self._finalcall = False
@@ -242,7 +242,6 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
 
             raise
 
-        logger.debug(f"[StreamHTTPMessageEvent] [send_streaming] self._finalcall:{self._finalcall}")
         if self._finalcall:
             await self.send_end_signal()
             self._finalcall = False
@@ -276,7 +275,6 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
         logger.debug(f"[StreamHTTPMessageEvent] 已发送结束信号 (event_id: {self.event_id})")
 
     def set_final_call(self):
-        logger.debug("[StreamHTTPMessageEvent] 调用 set_final_call 函数")
         self._finalcall = True
 
     async def queue_put_generator(self, generator):
