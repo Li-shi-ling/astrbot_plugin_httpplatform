@@ -373,7 +373,7 @@ class HTTPAdapter(Platform):
                 )
 
                 # 设置额外信息
-                event.set_extra("original_data", data)
+                event.set_extra("data", data)
 
                 event.is_wake = True
                 event.is_at_or_wake_command = True
