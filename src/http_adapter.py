@@ -424,31 +424,34 @@ class HTTPAdapter(Platform):
                             # 等待队列消息，使用短超时以便检查其他条件
                             item = await asyncio.wait_for(queue.get(), timeout=1.0)
 
-                            if item is None:
-                                # None 是特殊的结束信号
+                            try:
+                                if item is None:
+                                    # None 是特殊的结束信号
+                                    yield (
+                                        f"event: {HTTP_MESSAGE_TYPE['END']}\n"
+                                        f"data: {json.dumps({'reason': 'normal_end'})}\n\n"
+                                    )
+                                    received_end_event = True
+                                    break
+
+                                # 处理事件
+                                event_type = item.get('type')
+
+                                # 更新最后活动时间
+                                last_activity_time = time.time()
+
+                                # 发送事件
                                 yield (
-                                    f"event: {HTTP_MESSAGE_TYPE['END']}\n"
-                                    f"data: {json.dumps({'reason': 'normal_end'})}\n\n"
+                                    f"event: {item.get('type')}\n"
+                                    f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
                                 )
-                                received_end_event = True
-                                break
 
-                            # 处理事件
-                            event_type = item.get('type')
-
-                            # 更新最后活动时间
-                            last_activity_time = time.time()
-
-                            # 发送事件
-                            yield (
-                                f"event: {item.get('type')}\n"
-                                f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
-                            )
-
-                            # 如果是 end 事件，结束循环
-                            if event_type == HTTP_MESSAGE_TYPE['END']:
-                                received_end_event = True
-                                break
+                                # 如果是 end 事件，结束循环
+                                if event_type == HTTP_MESSAGE_TYPE['END']:
+                                    received_end_event = True
+                                    break
+                            finally:
+                                queue.task_done()
 
                         except asyncio.TimeoutError:
                             # 超时是正常的，继续循环检查其他条件
@@ -572,9 +575,26 @@ class HTTPAdapter(Platform):
         if self.pending_responses:
             for event_id, pending in list(self.pending_responses.items()):
                 if not pending.future.done():
-                    pending.future.set_exception(
-                        asyncio.CancelledError("适配器终止")
-                    )
+                    exc = asyncio.CancelledError("适配器终止")
+                    try:
+                        current_loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        current_loop = None
+
+                    try:
+                        future_loop = pending.future.get_loop()
+                    except Exception:
+                        future_loop = None
+
+                    if current_loop is not None and future_loop is not None and current_loop is future_loop:
+                        pending.future.set_exception(exc)
+                    elif future_loop is not None:
+                        try:
+                            future_loop.call_soon_threadsafe(pending.future.set_exception, exc)
+                        except RuntimeError:
+                            pending.future.set_exception(exc)
+                    else:
+                        pending.future.set_exception(exc)
 
             self.pending_responses.clear()
 

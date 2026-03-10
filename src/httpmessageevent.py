@@ -1,13 +1,13 @@
-from astrbot.api.event import AstrMessageEvent
-from astrbot.api.event import MessageChain
-from astrbot.api import logger
-
-from .dataclasses import HTTPRequestData
-from .constants import HTTP_MESSAGE_TYPE, HTTP_EVENT_TYPE
-from .tool import BMC2Dict
-
-from collections.abc import AsyncGenerator
 import asyncio
+import time
+from collections.abc import AsyncGenerator
+
+from astrbot.api import logger
+from astrbot.api.event import AstrMessageEvent, MessageChain
+
+from .constants import HTTP_EVENT_TYPE, HTTP_MESSAGE_TYPE
+from .dataclasses import HTTPRequestData
+from .tool import BMC2Dict
 
 # ==================== HTTP 消息事件类 ====================
 class HTTPMessageEvent(AstrMessageEvent):
@@ -151,7 +151,25 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         # 设置响应结果
         if pending and not pending.future.done():
             result_json = self._cached_response
-            pending.future.set_result(result_json)
+            try:
+                current_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                current_loop = None
+
+            try:
+                future_loop = pending.future.get_loop()
+            except Exception:
+                future_loop = None
+
+            if current_loop is not None and future_loop is not None and current_loop is future_loop:
+                pending.future.set_result(result_json)
+            elif future_loop is not None:
+                try:
+                    future_loop.call_soon_threadsafe(pending.future.set_result, result_json)
+                except RuntimeError:
+                    pending.future.set_result(result_json)
+            else:
+                pending.future.set_result(result_json)
 
             logger.debug(f"[StandardHTTPMessageEvent] 已发送响应 (event_id: {self.event_id}, 消息数: {len(self._cached_response)})")
         else:
@@ -171,10 +189,23 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
     def __init__(self, message_str, message_obj, platform_meta, session_id, adapter, queue, event_id, request_data):
         super().__init__(message_str, message_obj, platform_meta, session_id, adapter, event_id, request_data)
         self.queue = queue
+        try:
+            self._queue_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._queue_loop = asyncio.get_event_loop()
         self._is_streaming = False
-        self._stream_complete = asyncio.Event()
+        self._stream_complete = None
+        self._stream_complete_loop = None
+        self._last_overflow_log = 0.0
         self.set_extra("streaming", True)
         self._finalcall = False
+
+    def _get_stream_complete_event(self) -> asyncio.Event:
+        loop = asyncio.get_running_loop()
+        if self._stream_complete is None or self._stream_complete_loop is not loop:
+            self._stream_complete = asyncio.Event()
+            self._stream_complete_loop = loop
+        return self._stream_complete
 
     async def send(self, message_chain: MessageChain):
         """发送完整响应 - 用于非流式输出"""
@@ -207,7 +238,8 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
         try:
             # 标记开始流式传输
             self._is_streaming = True
-            self._stream_complete.clear()
+            stream_complete = self._get_stream_complete_event()
+            stream_complete.clear()
 
             # 流式发送每个消息块
             await self.queue_put_generator(generator)
@@ -215,7 +247,7 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
 
             # 注意：这里不再发送 END 信号，只标记内部完成
             self._is_streaming = False
-            self._stream_complete.set()
+            stream_complete.set()
 
         except Exception as e:
             logger.error(f"[StreamHTTPMessageEvent] 流式发送时出错: {e}", exc_info=True)
@@ -233,7 +265,7 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
 
             # 标记流式传输完成（即使出错）
             self._is_streaming = False
-            self._stream_complete.set()
+            self._get_stream_complete_event().set()
 
             raise
 
@@ -245,7 +277,7 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
         """结束当前的流式传输（内部使用，不对外发送结束信号）"""
         if self._is_streaming:
             self._is_streaming = False
-            self._stream_complete.set()
+            self._get_stream_complete_event().set()
 
     async def send_end_signal(self):
         """
@@ -255,7 +287,7 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
         if self._is_streaming:
             # 等待流式传输完成（但最多等待5秒）
             try:
-                await asyncio.wait_for(self._stream_complete.wait(), timeout=5.0)
+                await asyncio.wait_for(self._get_stream_complete_event().wait(), timeout=5.0)
             except asyncio.TimeoutError:
                 logger.warning(f"[StreamHTTPMessageEvent] 等待流式完成超时 (event_id: {self.event_id})")
                 self._is_streaming = False
@@ -273,32 +305,154 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
         self._finalcall = True
 
     async def queue_put_generator(self, generator):
+        text_buffer: list[str] = []
+        text_buffer_len = 0
+        text_buffer_type: str | None = None
+        last_flush_time = time.monotonic()
+        flush_interval = 0.05
+        max_buffer_len = 512
+
+        async def flush_text_buffer() -> bool:
+            nonlocal text_buffer, text_buffer_len, text_buffer_type, last_flush_time
+            if not text_buffer:
+                return True
+            merged_text = "".join(text_buffer)
+            text_buffer = []
+            text_buffer_len = 0
+            buffer_type = text_buffer_type or "plain"
+            text_buffer_type = None
+            last_flush_time = time.monotonic()
+            return await self._safe_put(
+                {
+                    "type": HTTP_MESSAGE_TYPE["MESSAGE"],
+                    "data": {"content": {"type": "plain", "data": {"text": merged_text}}},
+                    "text_type": buffer_type,
+                },
+            )
+
+        consecutive_failures = 0
         async for message_chain in generator:
             if not self._is_streaming:
                 break
             for message in message_chain.chain:
                 response_text, text_type = BMC2Dict(message)
 
-                success = await self._safe_put({
-                    "type": HTTP_MESSAGE_TYPE["MESSAGE"],
-                    "data": {"content": response_text},
-                    "text_type": text_type
-                })
+                is_plain = (
+                    str(text_type).lower() in {"plain", "text"}
+                    and isinstance(response_text, dict)
+                    and isinstance((response_text.get("data") or {}).get("text"), str)
+                )
+                if is_plain:
+                    if text_buffer_type is None:
+                        text_buffer_type = str(text_type)
+                    text = (response_text.get("data") or {}).get("text")
+                    text_buffer.append(text)
+                    text_buffer_len += len(text)
+                    now = time.monotonic()
+                    if text_buffer_len >= max_buffer_len or now - last_flush_time >= flush_interval:
+                        success = await flush_text_buffer()
+                        if not success:
+                            consecutive_failures += 1
+                            if consecutive_failures >= 3:
+                                self._is_streaming = False
+                                break
+                        else:
+                            consecutive_failures = 0
+                    continue
+
+                if text_buffer:
+                    success = await flush_text_buffer()
+                    if not success:
+                        consecutive_failures += 1
+                        if consecutive_failures >= 3:
+                            self._is_streaming = False
+                            break
+                    else:
+                        consecutive_failures = 0
+
+                success = await self._safe_put(
+                    {
+                        "type": HTTP_MESSAGE_TYPE["MESSAGE"],
+                        "data": {"content": response_text},
+                        "text_type": text_type,
+                    },
+                )
                 if not success:
-                    # 队列持续满，停止生成
-                    self._is_streaming = False
-                    break
+                    consecutive_failures += 1
+                    if consecutive_failures >= 3:
+                        self._is_streaming = False
+                        break
+                else:
+                    consecutive_failures = 0
+
+            if not self._is_streaming:
+                break
+
+        if self._is_streaming and text_buffer:
+            await flush_text_buffer()
 
     def get_has_send_oper(self):
         return getattr(self, "_has_send_oper", False)
 
-    async def _safe_put(self, item: dict, timeout: float = 1.0):
+    async def _force_put(self, item: dict, timeout: float = 1.0) -> bool:
+        async def _inner() -> bool:
+            while True:
+                try:
+                    self.queue.put_nowait(item)
+                    return True
+                except asyncio.QueueFull:
+                    try:
+                        self.queue.get_nowait()
+                        self.queue.task_done()
+                    except asyncio.QueueEmpty:
+                        return False
+
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if current_loop is not None and current_loop is self._queue_loop:
+            return await _inner()
+
+        fut = asyncio.run_coroutine_threadsafe(_inner(), self._queue_loop)
+        try:
+            return await asyncio.wait_for(asyncio.wrap_future(fut), timeout=timeout)
+        except asyncio.TimeoutError:
+            fut.cancel()
+            return False
+
+    async def _safe_put(self, item: dict, timeout: float = 1.0) -> bool:
         """安全入队，防止反压阻塞"""
         try:
-            await asyncio.wait_for(self.queue.put(item), timeout=timeout)
+            try:
+                current_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                current_loop = None
+
+            if current_loop is not None and current_loop is self._queue_loop:
+                await asyncio.wait_for(self.queue.put(item), timeout=timeout)
+            else:
+                fut = asyncio.run_coroutine_threadsafe(self.queue.put(item), self._queue_loop)
+                try:
+                    await asyncio.wait_for(asyncio.wrap_future(fut), timeout=timeout)
+                except asyncio.TimeoutError:
+                    fut.cancel()
+                    raise
             return True
         except asyncio.TimeoutError:
-            logger.warning(
-                f"[StreamHTTPMessageEvent] 队列已满，丢弃消息 (event_id: {self.event_id})"
-            )
+            now = time.monotonic()
+            if now - self._last_overflow_log >= 5.0:
+                logger.warning(
+                    f"[StreamHTTPMessageEvent] 队列拥塞，消息可能被丢弃或合并 (event_id: {self.event_id})",
+                )
+                self._last_overflow_log = now
+
+            if item.get("type") in {
+                HTTP_MESSAGE_TYPE["END"],
+                HTTP_MESSAGE_TYPE["ERROR"],
+                HTTP_MESSAGE_TYPE["TIMEOUT"],
+            }:
+                return await self._force_put(item, timeout=timeout)
+
             return False
