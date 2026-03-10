@@ -198,7 +198,7 @@ class HTTPAdapter(Platform):
             platform = data.get('platform', "")
             user_id = data.get('user_id', '0')
             nickname = data.get('nickname', '外部用户')
-            session_id = f"{platform}_{user_id}"
+            session_id = str(data.get("session_id") or f"{platform}_{user_id}")
 
             # 创建事件并提交
             event_id = str(uuid.uuid4())
@@ -338,7 +338,7 @@ class HTTPAdapter(Platform):
             platform = data.get('platform', "")
             user_id = data.get('user_id', '0')
             username = data.get('username', '外部用户')
-            session_id = f"{platform}_{user_id}"
+            session_id = str(data.get("session_id") or f"{platform}_{user_id}")
 
             # 创建 SSE 响应生成器
             async def generate():
