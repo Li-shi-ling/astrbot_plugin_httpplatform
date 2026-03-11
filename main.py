@@ -10,7 +10,11 @@ AstrBot HTTP Adapter 示例程序
 3. 完整的鉴权和安全控制
 """
 
+import json
+import sqlite3
 import sys
+from pathlib import Path
+from types import MethodType
 
 from astrbot.api.star import Context, Star
 from astrbot.api.event import AstrMessageEvent, filter
@@ -149,6 +153,10 @@ class HTTPAdapterPlugin(Star):
         return True
 
     def _install_runtime_patches(self) -> None:
+        self._install_agent_internal_traceback_patch()
+        self._install_shared_preferences_sync_get_patch()
+
+    def _install_agent_internal_traceback_patch(self) -> None:
         try:
             from astrbot.core.pipeline.process_stage.method.agent_sub_stages import (
                 internal as agent_internal,
@@ -181,6 +189,102 @@ class HTTPAdapterPlugin(Star):
                 return getattr(self._inner, name)
 
         agent_internal.logger = _AgentInternalLoggerProxy(agent_internal.logger)
+
+    def _install_shared_preferences_sync_get_patch(self) -> None:
+        try:
+            from astrbot.core import sp
+        except Exception as e:
+            logger.warning(
+                f"[HTTPAdapter] Skip runtime patch: failed to import shared preferences: {e}",
+            )
+            return
+
+        if getattr(sp, "_httpplatform_sqlite_sync_get_patch_installed", False):
+            return
+        sp._httpplatform_sqlite_sync_get_patch_installed = True
+
+        original_get = sp.get
+
+        def _sqlite_get_val(
+            db_path: Path,
+            scope: str,
+            scope_id: str,
+            key: str,
+        ) -> object | None:
+            if not db_path.exists():
+                return None
+
+            try:
+                conn = sqlite3.connect(str(db_path), timeout=1.0)
+            except sqlite3.Error:
+                return None
+
+            try:
+                cursor = conn.execute(
+                    "SELECT value FROM preferences WHERE scope=? AND scope_id=? AND key=? LIMIT 1",
+                    (scope, scope_id, key),
+                )
+                row = cursor.fetchone()
+            except sqlite3.Error:
+                return None
+            finally:
+                conn.close()
+
+            if not row:
+                return None
+
+            raw = row[0]
+            if raw is None:
+                return None
+            if isinstance(raw, (bytes, bytearray)):
+                raw = raw.decode("utf-8", errors="ignore")
+
+            if isinstance(raw, str):
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError:
+                    return None
+            elif isinstance(raw, dict):
+                payload = raw
+            else:
+                return None
+
+            if not isinstance(payload, dict):
+                return None
+            return payload.get("val")
+
+        def patched_get(self, key, default=None, scope: str | None = None, scope_id=""):
+            if scope_id == "":
+                scope_id = "unknown"
+            if scope_id is None or key is None:
+                raise ValueError(
+                    "scope_id and key cannot be None when getting a specific preference.",
+                )
+
+            scope_value = scope or "unknown"
+            scope_id_value = scope_id or "unknown"
+
+            db_path_raw = getattr(getattr(self, "db_helper", None), "db_path", None)
+            if db_path_raw:
+                try:
+                    val = _sqlite_get_val(
+                        Path(db_path_raw),
+                        scope_value,
+                        scope_id_value,
+                        key,
+                    )
+                    return val if val is not None else default
+                except Exception:
+                    pass
+
+            try:
+                return original_get(key, default, scope=scope, scope_id=scope_id)
+            except RuntimeError as e:
+                if "bound to a different event loop" not in str(e):
+                    raise
+                return default
+
+        sp.get = MethodType(patched_get, sp)
 
     async def initialize(self):
         """初始化插件"""
