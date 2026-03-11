@@ -114,6 +114,43 @@ class HTTPAdapter(Platform):
         task.add_done_callback(self._background_tasks.discard)
         return task
 
+    def _set_future_exception_safely(
+        self,
+        fut: asyncio.Future,
+        exc: BaseException,
+    ) -> None:
+        try:
+            loop = fut.get_loop()
+        except Exception:
+            loop = None
+
+        def _do_set() -> None:
+            if fut.done():
+                return
+            try:
+                fut.set_exception(exc)
+            except asyncio.InvalidStateError:
+                # Future was completed concurrently; ignore.
+                pass
+
+        if loop is None:
+            _do_set()
+            return
+
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if current_loop is loop:
+            _do_set()
+            return
+
+        try:
+            loop.call_soon_threadsafe(_do_set)
+        except RuntimeError:
+            _do_set()
+
     def meta(self) -> PlatformMetadata:
         return self._metadata
 
@@ -582,28 +619,9 @@ class HTTPAdapter(Platform):
 
         # 取消所有等待中的响应
         if self.pending_responses:
+            exc = asyncio.CancelledError("适配器终止")
             for event_id, pending in list(self.pending_responses.items()):
-                if not pending.future.done():
-                    exc = asyncio.CancelledError("适配器终止")
-                    try:
-                        current_loop = asyncio.get_running_loop()
-                    except RuntimeError:
-                        current_loop = None
-
-                    try:
-                        future_loop = pending.future.get_loop()
-                    except Exception:
-                        future_loop = None
-
-                    if current_loop is not None and future_loop is not None and current_loop is future_loop:
-                        pending.future.set_exception(exc)
-                    elif future_loop is not None:
-                        try:
-                            future_loop.call_soon_threadsafe(pending.future.set_exception, exc)
-                        except RuntimeError:
-                            pending.future.set_exception(exc)
-                    else:
-                        pending.future.set_exception(exc)
+                self._set_future_exception_safely(pending.future, exc)
 
             self.pending_responses.clear()
 

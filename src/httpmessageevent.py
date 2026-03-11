@@ -198,15 +198,24 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
             except Exception:
                 future_loop = None
 
+            def _do_set_result() -> None:
+                if pending.future.done():
+                    return
+                try:
+                    pending.future.set_result(result_json)
+                except asyncio.InvalidStateError:
+                    # Future was completed concurrently; ignore.
+                    pass
+
             if current_loop is not None and future_loop is not None and current_loop is future_loop:
-                pending.future.set_result(result_json)
+                _do_set_result()
             elif future_loop is not None:
                 try:
-                    future_loop.call_soon_threadsafe(pending.future.set_result, result_json)
+                    future_loop.call_soon_threadsafe(_do_set_result)
                 except RuntimeError:
-                    pending.future.set_result(result_json)
+                    _do_set_result()
             else:
-                pending.future.set_result(result_json)
+                _do_set_result()
 
             logger.debug(f"[StandardHTTPMessageEvent] 已发送响应 (event_id: {self.event_id}, 消息数: {len(self._cached_response)})")
         else:
@@ -376,7 +385,7 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             return await self._safe_put(
                 {
                     "type": HTTP_MESSAGE_TYPE["MESSAGE"],
-                    "data": {"content": {"type": "plain", "data": {"text": merged_text}}},
+                    "data": {"content": {"type": buffer_type, "data": {"text": merged_text}}},
                     "text_type": buffer_type,
                 },
             )
@@ -446,8 +455,12 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
         return getattr(self, "_has_send_oper", False)
 
     async def _force_put(self, item: dict, timeout: float = 1.0) -> bool:
+        deadline = time.monotonic() + timeout if timeout and timeout > 0 else time.monotonic()
+
         async def _inner() -> bool:
             while True:
+                if time.monotonic() >= deadline:
+                    return False
                 try:
                     self.queue.put_nowait(item)
                     return True
@@ -456,7 +469,9 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
                         self.queue.get_nowait()
                         self.queue.task_done()
                     except asyncio.QueueEmpty:
-                        return False
+                        # The queue can be drained by the consumer between QueueFull and get_nowait().
+                        await asyncio.sleep(0)
+                        continue
 
         try:
             current_loop = asyncio.get_running_loop()
@@ -466,7 +481,10 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
         if current_loop is not None and current_loop is self._queue_loop:
             return await _inner()
 
-        fut = asyncio.run_coroutine_threadsafe(_inner(), self._queue_loop)
+        try:
+            fut = asyncio.run_coroutine_threadsafe(_inner(), self._queue_loop)
+        except RuntimeError:
+            return False
         try:
             return await asyncio.wait_for(asyncio.wrap_future(fut), timeout=timeout)
         except asyncio.TimeoutError:
@@ -484,7 +502,13 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             if current_loop is not None and current_loop is self._queue_loop:
                 await asyncio.wait_for(self.queue.put(item), timeout=timeout)
             else:
-                fut = asyncio.run_coroutine_threadsafe(self.queue.put(item), self._queue_loop)
+                try:
+                    fut = asyncio.run_coroutine_threadsafe(
+                        self.queue.put(item),
+                        self._queue_loop,
+                    )
+                except RuntimeError:
+                    return False
                 try:
                     await asyncio.wait_for(asyncio.wrap_future(fut), timeout=timeout)
                 except asyncio.TimeoutError:
