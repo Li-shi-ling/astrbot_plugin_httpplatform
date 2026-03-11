@@ -114,6 +114,43 @@ class HTTPAdapter(Platform):
         task.add_done_callback(self._background_tasks.discard)
         return task
 
+    def _set_future_exception_safely(
+        self,
+        fut: asyncio.Future,
+        exc: BaseException,
+    ) -> None:
+        try:
+            loop = fut.get_loop()
+        except Exception:
+            loop = None
+
+        def _do_set() -> None:
+            if fut.done():
+                return
+            try:
+                fut.set_exception(exc)
+            except asyncio.InvalidStateError:
+                # Future was completed concurrently; ignore.
+                pass
+
+        if loop is None:
+            _do_set()
+            return
+
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if current_loop is loop:
+            _do_set()
+            return
+
+        try:
+            loop.call_soon_threadsafe(_do_set)
+        except RuntimeError:
+            _do_set()
+
     def meta(self) -> PlatformMetadata:
         return self._metadata
 
@@ -198,7 +235,7 @@ class HTTPAdapter(Platform):
             platform = data.get('platform', "")
             user_id = data.get('user_id', '0')
             nickname = data.get('nickname', '外部用户')
-            session_id = f"{platform}_{user_id}"
+            session_id = str(data.get("session_id") or f"{platform}_{user_id}")
 
             # 创建事件并提交
             event_id = str(uuid.uuid4())
@@ -338,7 +375,7 @@ class HTTPAdapter(Platform):
             platform = data.get('platform', "")
             user_id = data.get('user_id', '0')
             username = data.get('username', '外部用户')
-            session_id = f"{platform}_{user_id}"
+            session_id = str(data.get("session_id") or f"{platform}_{user_id}")
 
             # 创建 SSE 响应生成器
             async def generate():
@@ -399,6 +436,15 @@ class HTTPAdapter(Platform):
                 if timeout < 0:
                     logger.error(f"[HTTPAdapter] timeout:{timeout} < 0 使用 600")
                     timeout = 600
+                heartbeat_interval = data.get("heartbeat_interval", 10)
+                if not isinstance(heartbeat_interval, int):
+                    try:
+                        heartbeat_interval = int(heartbeat_interval)
+                    except Exception:
+                        heartbeat_interval = 10
+                if heartbeat_interval <= 0:
+                    heartbeat_interval = 10
+
                 start_time = time.time()
                 last_activity_time = time.time()
                 received_end_event = False
@@ -415,7 +461,7 @@ class HTTPAdapter(Platform):
                             break
 
                         # 检查活动超时（60秒无活动发送心跳）
-                        if current_time - last_activity_time > 60:
+                        if current_time - last_activity_time > heartbeat_interval:
                             # 发送心跳保持连接
                             yield f": heartbeat {int(current_time)}\n\n"
                             last_activity_time = current_time
@@ -424,31 +470,34 @@ class HTTPAdapter(Platform):
                             # 等待队列消息，使用短超时以便检查其他条件
                             item = await asyncio.wait_for(queue.get(), timeout=1.0)
 
-                            if item is None:
-                                # None 是特殊的结束信号
+                            try:
+                                if item is None:
+                                    # None 是特殊的结束信号
+                                    yield (
+                                        f"event: {HTTP_MESSAGE_TYPE['END']}\n"
+                                        f"data: {json.dumps({'reason': 'normal_end'})}\n\n"
+                                    )
+                                    received_end_event = True
+                                    break
+
+                                # 处理事件
+                                event_type = item.get('type')
+
+                                # 更新最后活动时间
+                                last_activity_time = time.time()
+
+                                # 发送事件
                                 yield (
-                                    f"event: {HTTP_MESSAGE_TYPE['END']}\n"
-                                    f"data: {json.dumps({'reason': 'normal_end'})}\n\n"
+                                    f"event: {item.get('type')}\n"
+                                    f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
                                 )
-                                received_end_event = True
-                                break
 
-                            # 处理事件
-                            event_type = item.get('type')
-
-                            # 更新最后活动时间
-                            last_activity_time = time.time()
-
-                            # 发送事件
-                            yield (
-                                f"event: {item.get('type')}\n"
-                                f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
-                            )
-
-                            # 如果是 end 事件，结束循环
-                            if event_type == HTTP_MESSAGE_TYPE['END']:
-                                received_end_event = True
-                                break
+                                # 如果是 end 事件，结束循环
+                                if event_type == HTTP_MESSAGE_TYPE['END']:
+                                    received_end_event = True
+                                    break
+                            finally:
+                                queue.task_done()
 
                         except asyncio.TimeoutError:
                             # 超时是正常的，继续循环检查其他条件
@@ -570,11 +619,9 @@ class HTTPAdapter(Platform):
 
         # 取消所有等待中的响应
         if self.pending_responses:
+            exc = asyncio.CancelledError("适配器终止")
             for event_id, pending in list(self.pending_responses.items()):
-                if not pending.future.done():
-                    pending.future.set_exception(
-                        asyncio.CancelledError("适配器终止")
-                    )
+                self._set_future_exception_safely(pending.future, exc)
 
             self.pending_responses.clear()
 
