@@ -399,6 +399,15 @@ class HTTPAdapter(Platform):
                 if timeout < 0:
                     logger.error(f"[HTTPAdapter] timeout:{timeout} < 0 使用 600")
                     timeout = 600
+                heartbeat_interval = data.get("heartbeat_interval", 10)
+                if not isinstance(heartbeat_interval, int):
+                    try:
+                        heartbeat_interval = int(heartbeat_interval)
+                    except Exception:
+                        heartbeat_interval = 10
+                if heartbeat_interval <= 0:
+                    heartbeat_interval = 10
+
                 start_time = time.time()
                 last_activity_time = time.time()
                 received_end_event = False
@@ -415,7 +424,7 @@ class HTTPAdapter(Platform):
                             break
 
                         # 检查活动超时（60秒无活动发送心跳）
-                        if current_time - last_activity_time > 60:
+                        if current_time - last_activity_time > heartbeat_interval:
                             # 发送心跳保持连接
                             yield f": heartbeat {int(current_time)}\n\n"
                             last_activity_time = current_time

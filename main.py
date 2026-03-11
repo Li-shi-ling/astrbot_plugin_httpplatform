@@ -10,6 +10,8 @@ AstrBot HTTP Adapter 示例程序
 3. 完整的鉴权和安全控制
 """
 
+import sys
+
 from astrbot.api.star import Context, Star
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.core.config.default import CONFIG_METADATA_2
@@ -146,9 +148,44 @@ class HTTPAdapterPlugin(Star):
         logger.info("[HTTPAdapter] 配置信息清理成功")
         return True
 
+    def _install_runtime_patches(self) -> None:
+        try:
+            from astrbot.core.pipeline.process_stage.method.agent_sub_stages import (
+                internal as agent_internal,
+            )
+        except Exception as e:
+            logger.warning(
+                f"[HTTPAdapter] Skip runtime patch: failed to import agent internal stage: {e}",
+            )
+            return
+
+        if getattr(agent_internal, "_httpplatform_agent_error_patch_installed", False):
+            return
+        agent_internal._httpplatform_agent_error_patch_installed = True
+
+        class _AgentInternalLoggerProxy:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def error(self, msg, *args, **kwargs):
+                if (
+                    isinstance(msg, str)
+                    and msg.startswith("Error occurred while processing agent:")
+                    and sys.exc_info()[0] is not None
+                    and "exc_info" not in kwargs
+                ):
+                    kwargs["exc_info"] = True
+                return self._inner.error(msg, *args, **kwargs)
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+        agent_internal.logger = _AgentInternalLoggerProxy(agent_internal.logger)
+
     async def initialize(self):
         """初始化插件"""
         self._register_config()
+        self._install_runtime_patches()
         logger.info("[HTTPAdapter] HTTP 适配器插件初始化完成")
 
     async def terminate(self):

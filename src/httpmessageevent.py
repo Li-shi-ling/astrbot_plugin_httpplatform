@@ -1,4 +1,5 @@
 import asyncio
+import sys
 import time
 from collections.abc import AsyncGenerator
 
@@ -8,6 +9,36 @@ from astrbot.api.event import AstrMessageEvent, MessageChain
 from .constants import HTTP_EVENT_TYPE, HTTP_MESSAGE_TYPE
 from .dataclasses import HTTPRequestData
 from .tool import BMC2Dict
+
+# NOTE: When core agent processing hits an exception, AstrBot calls `event.send(...)`
+# inside `agent_sub_stages/internal.py`'s exception handler but does not guarantee a
+# final END signal for HTTP streaming / future-based HTTP responses. We detect that
+# context and auto-finalize to prevent hung requests.
+_INTERNAL_AGENT_SUBSTAGE_FILE_FRAGMENT = "agent_sub_stages/internal.py"
+
+
+def _is_internal_agent_exception_context() -> bool:
+    if sys.exc_info()[0] is None:
+        return False
+
+    try:
+        frame = sys._getframe(1)
+    except (AttributeError, ValueError):
+        return False
+
+    while frame is not None:
+        try:
+            filename = frame.f_code.co_filename.replace("\\", "/")
+            if (
+                _INTERNAL_AGENT_SUBSTAGE_FILE_FRAGMENT in filename
+                and frame.f_code.co_name == "process"
+            ):
+                return True
+        except Exception:
+            return False
+        frame = frame.f_back
+
+    return False
 
 # ==================== HTTP 消息事件类 ====================
 class HTTPMessageEvent(AstrMessageEvent):
@@ -88,6 +119,7 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         缓存消息链数据，不立即发送响应
         """
         # 处理消息链
+        self._has_send_oper = True
         full_response = []
         for message in message_chain.chain:
             response_json, text_type = BMC2Dict(message)
@@ -103,6 +135,11 @@ class StandardHTTPMessageEvent(HTTPMessageEvent):
         # 缓存完整的响应数据
         self._cached_response.extend(full_response)
         logger.debug(f"[StandardHTTPMessageEvent] 已缓存响应数据 (event_id: {self.event_id}, 消息数: {len(full_response)})")
+
+        if _is_internal_agent_exception_context():
+            await self.send_response()
+            self._finalcall = False
+            return
 
         if self._finalcall:
             await self.send_response()
@@ -210,6 +247,7 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
     async def send(self, message_chain: MessageChain):
         """发送完整响应 - 用于非流式输出"""
         # 发送完整消息（这将发送多条消息，但不会发送结束信号）
+        self._has_send_oper = True
         for message in message_chain.chain:
             response_text, text_type = BMC2Dict(message)
             success = await self._safe_put({
@@ -219,6 +257,11 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             })
             if not success:
                 break
+
+        if _is_internal_agent_exception_context():
+            await self.send_end_signal()
+            self._finalcall = False
+            return
 
         if self._finalcall:
             await self.send_end_signal()
@@ -266,6 +309,14 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             # 标记流式传输完成（即使出错）
             self._is_streaming = False
             self._get_stream_complete_event().set()
+
+            try:
+                await self.send_end_signal()
+            except Exception as end_error:
+                logger.error(
+                    f"[StreamHTTPMessageEvent] Failed to send END after error: {end_error}",
+                    exc_info=True,
+                )
 
             raise
 
