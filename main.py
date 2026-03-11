@@ -10,6 +10,12 @@ AstrBot HTTP Adapter 示例程序
 3. 完整的鉴权和安全控制
 """
 
+import json
+import sqlite3
+import sys
+from pathlib import Path
+from types import MethodType
+
 from astrbot.api.star import Context, Star
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.core.config.default import CONFIG_METADATA_2
@@ -146,9 +152,144 @@ class HTTPAdapterPlugin(Star):
         logger.info("[HTTPAdapter] 配置信息清理成功")
         return True
 
+    def _install_runtime_patches(self) -> None:
+        self._install_agent_internal_traceback_patch()
+        self._install_shared_preferences_sync_get_patch()
+
+    def _install_agent_internal_traceback_patch(self) -> None:
+        try:
+            from astrbot.core.pipeline.process_stage.method.agent_sub_stages import (
+                internal as agent_internal,
+            )
+        except Exception as e:
+            logger.warning(
+                f"[HTTPAdapter] Skip runtime patch: failed to import agent internal stage: {e}",
+            )
+            return
+
+        if getattr(agent_internal, "_httpplatform_agent_error_patch_installed", False):
+            return
+        agent_internal._httpplatform_agent_error_patch_installed = True
+
+        class _AgentInternalLoggerProxy:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def error(self, msg, *args, **kwargs):
+                if (
+                    isinstance(msg, str)
+                    and msg.startswith("Error occurred while processing agent:")
+                    and sys.exc_info()[0] is not None
+                    and "exc_info" not in kwargs
+                ):
+                    kwargs["exc_info"] = True
+                return self._inner.error(msg, *args, **kwargs)
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+        agent_internal.logger = _AgentInternalLoggerProxy(agent_internal.logger)
+
+    def _install_shared_preferences_sync_get_patch(self) -> None:
+        try:
+            from astrbot.core import sp
+        except Exception as e:
+            logger.warning(
+                f"[HTTPAdapter] Skip runtime patch: failed to import shared preferences: {e}",
+            )
+            return
+
+        if getattr(sp, "_httpplatform_sqlite_sync_get_patch_installed", False):
+            return
+        sp._httpplatform_sqlite_sync_get_patch_installed = True
+
+        original_get = sp.get
+
+        def _sqlite_get_val(
+            db_path: Path,
+            scope: str,
+            scope_id: str,
+            key: str,
+        ) -> object | None:
+            if not db_path.exists():
+                return None
+
+            try:
+                conn = sqlite3.connect(str(db_path), timeout=1.0)
+            except sqlite3.Error:
+                return None
+
+            try:
+                cursor = conn.execute(
+                    "SELECT value FROM preferences WHERE scope=? AND scope_id=? AND key=? LIMIT 1",
+                    (scope, scope_id, key),
+                )
+                row = cursor.fetchone()
+            except sqlite3.Error:
+                return None
+            finally:
+                conn.close()
+
+            if not row:
+                return None
+
+            raw = row[0]
+            if raw is None:
+                return None
+            if isinstance(raw, (bytes, bytearray)):
+                raw = raw.decode("utf-8", errors="ignore")
+
+            if isinstance(raw, str):
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError:
+                    return None
+            elif isinstance(raw, dict):
+                payload = raw
+            else:
+                return None
+
+            if not isinstance(payload, dict):
+                return None
+            return payload.get("val")
+
+        def patched_get(self, key, default=None, scope: str | None = None, scope_id=""):
+            if scope_id == "":
+                scope_id = "unknown"
+            if scope_id is None or key is None:
+                raise ValueError(
+                    "scope_id and key cannot be None when getting a specific preference.",
+                )
+
+            scope_value = scope or "unknown"
+            scope_id_value = scope_id or "unknown"
+
+            db_path_raw = getattr(getattr(self, "db_helper", None), "db_path", None)
+            if db_path_raw:
+                try:
+                    val = _sqlite_get_val(
+                        Path(db_path_raw),
+                        scope_value,
+                        scope_id_value,
+                        key,
+                    )
+                    return val if val is not None else default
+                except Exception:
+                    pass
+
+            try:
+                return original_get(key, default, scope=scope, scope_id=scope_id)
+            except RuntimeError as e:
+                if "bound to a different event loop" not in str(e):
+                    raise
+                return default
+
+        sp.get = MethodType(patched_get, sp)
+
     async def initialize(self):
         """初始化插件"""
         self._register_config()
+        self._install_runtime_patches()
         logger.info("[HTTPAdapter] HTTP 适配器插件初始化完成")
 
     async def terminate(self):
