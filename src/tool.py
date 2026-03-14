@@ -69,6 +69,7 @@ def BMC2Dict(data: BaseMessageComponent) -> tuple[dict[Any,Any], str]:
     Returns:
         tuple: (Dict, 类型字符串)
     """
+    logger.debug(f"[BMC2Dict] {data.toDict()}")
     return data.toDict(), str(data.type)
 
 # Dict类列表转变为BMC
