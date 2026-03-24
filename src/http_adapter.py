@@ -6,6 +6,7 @@ HTTP/HTTPS Platform Adapter for AstrBot
 """
 
 import asyncio
+import inspect
 import json
 import time
 import uuid
@@ -25,6 +26,7 @@ from astrbot.api.platform import (
     MessageType,
     Platform,
     PlatformMetadata,
+    register_platform_adapter,
 )
 from astrbot.core.platform.astr_message_event import MessageSesion
 
@@ -34,7 +36,125 @@ from .dataclasses import HTTPRequestData, PendingResponse
 from .httpmessageevent import StandardHTTPMessageEvent, StreamHTTPMessageEvent
 from .tool import Json2BMCChain
 
+HTTP_ADAPTER_DEFAULT_CONFIG_TMPL = {
+    "http_host": "0.0.0.0",
+    "http_port": 8080,
+    "api_prefix": "/api/v1",
+    "enable_http_api": True,
+    "auth_token": "",
+    "cors_origins": "*",
+}
+
+HTTP_ADAPTER_I18N_RESOURCES = {
+    "zh-CN": {
+        "http_host": {
+            "description": "HTTP 监听主机",
+            "hint": "HTTP 服务器监听的主机地址，0.0.0.0 表示所有网络接口",
+        },
+        "http_port": {
+            "description": "HTTP 监听端口",
+            "hint": "HTTP 服务器监听的端口号",
+        },
+        "api_prefix": {
+            "description": "API 路径前缀",
+            "hint": "所有 API 接口的 URL 前缀",
+        },
+        "enable_http_api": {
+            "description": "启用 HTTP API",
+            "hint": "是否启动 HTTP API 服务",
+        },
+        "auth_token": {
+            "description": "认证令牌",
+            "hint": "API 访问认证令牌，留空表示不启用认证",
+        },
+        "cors_origins": {
+            "description": "CORS 允许的源",
+            "hint": "跨域请求允许的来源，多个用逗号分隔，* 表示全部允许",
+        },
+    },
+    "en-US": {
+        "http_host": {
+            "description": "HTTP listen host",
+            "hint": "HTTP server listen host, 0.0.0.0 for all interfaces",
+        },
+        "http_port": {
+            "description": "HTTP listen port",
+            "hint": "HTTP server listen port",
+        },
+        "api_prefix": {
+            "description": "API path prefix",
+            "hint": "URL prefix for all API endpoints",
+        },
+        "enable_http_api": {
+            "description": "Enable HTTP API",
+            "hint": "Whether to start the HTTP API service",
+        },
+        "auth_token": {
+            "description": "Auth token",
+            "hint": "API access authentication token, leave empty to disable",
+        },
+        "cors_origins": {
+            "description": "CORS allowed origins",
+            "hint": "Allowed origins for CORS, comma separated, * for all",
+        },
+    },
+}
+
+HTTP_ADAPTER_CONFIG_METADATA = {
+    "http_host": {
+        "description": "HTTP 监听主机",
+        "type": "string",
+        "hint": "HTTP 服务器监听的主机地址，0.0.0.0 表示所有网络接口",
+    },
+    "http_port": {
+        "description": "HTTP 监听端口",
+        "type": "int",
+        "hint": "HTTP 服务器监听的端口号",
+    },
+    "api_prefix": {
+        "description": "API 路径前缀",
+        "type": "string",
+        "hint": "所有 API 接口的 URL 前缀",
+    },
+    "enable_http_api": {
+        "description": "启用 HTTP API",
+        "type": "bool",
+        "hint": "是否启动 HTTP API 服务",
+    },
+    "auth_token": {
+        "description": "认证令牌",
+        "type": "string",
+        "hint": "API 访问认证令牌，留空表示不启用认证",
+    },
+    "cors_origins": {
+        "description": "CORS 允许的源",
+        "type": "string",
+        "hint": "跨域请求允许的来源，多个用逗号分隔，* 表示全部允许",
+    },
+}
+
+try:
+    _REGISTER_ADAPTER_PARAM_NAMES = set(
+        inspect.signature(register_platform_adapter).parameters
+    )
+except (TypeError, ValueError):
+    _REGISTER_ADAPTER_PARAM_NAMES = set()
+
+
+def _get_http_adapter_registrar():
+    kwargs = {"default_config_tmpl": HTTP_ADAPTER_DEFAULT_CONFIG_TMPL}
+    if "i18n_resources" in _REGISTER_ADAPTER_PARAM_NAMES:
+        kwargs["i18n_resources"] = HTTP_ADAPTER_I18N_RESOURCES
+    if "config_metadata" in _REGISTER_ADAPTER_PARAM_NAMES:
+        kwargs["config_metadata"] = HTTP_ADAPTER_CONFIG_METADATA
+    return register_platform_adapter(
+        "http_adapter",
+        "HTTP/HTTPS 适配器 - 提供外部 HTTP 接口访问 AstrBot",
+        **kwargs,
+    )
+
 # ==================== HTTP 适配器主类 ====================
+@_get_http_adapter_registrar()
 class HTTPAdapter(Platform):
     """HTTP/HTTPS 平台适配器实现"""
 

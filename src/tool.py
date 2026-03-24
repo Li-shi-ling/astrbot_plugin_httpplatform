@@ -70,8 +70,6 @@ def BMC2Dict(data: BaseMessageComponent) -> tuple[dict[Any,Any], str]:
         tuple: (Dict, 类型字符串)
     """
     if isinstance(data, Plain):
-        if "请在平台日志查看和分享错误详情" in data.text:
-            data.text = "网络错误,请稍后再试"
         return {"type": "text", "data": {"text": data.text}}, str(data.type)
     return data.toDict(), str(data.type)
 
