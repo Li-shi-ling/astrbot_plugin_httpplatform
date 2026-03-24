@@ -81,7 +81,6 @@ class HTTPAdapterPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
         self.httpadapter = {}
-        # Register config metadata as early as possible after plugin load.
         self._register_config()
         self._http_adapter_cls = HTTPAdapter
         logger.info("[HTTPAdapter] HTTP adapter imported successfully")
