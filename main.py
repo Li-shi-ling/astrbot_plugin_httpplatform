@@ -20,7 +20,6 @@ from astrbot.api.star import Context, Star
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.core.config.default import CONFIG_METADATA_2
 from astrbot.api import logger
-from astrbot.api.platform import register_platform_adapter
 from astrbot.api.provider import LLMResponse
 from .src.http_adapter import HTTPAdapter
 from .src.httpmessageevent import StandardHTTPMessageEvent, StreamHTTPMessageEvent
@@ -78,45 +77,6 @@ class HTTPAdapterPlugin(Star):
     }
 
     _registered: bool = False
-
-    def _legacy_init_unused(self, context: Context):
-        super().__init__(context)
-        self.httpadapter = {}
-        # Register config metadata as early as possible after plugin load.
-        self._register_config()
-
-        # 导入 HTTP 适配器以注册它
-        # 装饰器会自动注册适配器
-        try:
-            import astrbot.cli
-            version = None
-            if hasattr(astrbot.cli, '__version__'):
-                version = astrbot.cli.__version__
-            if not version:
-                logger.warning("[astrbook] 没有找到astrbot版本号,使用4.14.8前的metadata注册方案")
-                self.register_414()
-            else:
-                try:
-                    # 提取版本号中的数字部分（如 4.16.0-beta -> [4,16,0]）
-                    import re
-                    version_parts = re.findall(r'\d+', version)
-                    v1 = [int(x) for x in version_parts]
-                    v2 = [int(x) for x in "4.16.0".split('.')]
-                    max_len = max(len(v1), len(v2))
-                    v1 += [0] * (max_len - len(v1))
-                    v2 += [0] * (max_len - len(v2))
-                    if v1 >= v2:
-                        self.register_416()
-                    else:
-                        self.register_414()
-                except ValueError as e:
-                    logger.warning(f"[astrbook] 解析版本号失败: {version}, {e}, 使用默认的4.14.8前注册方案")
-                    self.register_414()
-            self._http_adapter_cls = HTTPAdapter
-            logger.info("[HTTPAdapter] HTTP 适配器导入成功")
-        except ImportError as e:
-            logger.error(f"[HTTPAdapter] 导入 HTTP 适配器失败: {e}", exc_info=True)
-            raise
 
     def __init__(self, context: Context):
         super().__init__(context)
@@ -306,122 +266,6 @@ class HTTPAdapterPlugin(Star):
         """终止插件"""
         self._unregister_config()
         logger.info("[HTTPAdapter] HTTP 适配器插件终止")
-
-    @staticmethod
-    def register_416():
-        register_platform_adapter(
-            "http_adapter",  # 适配器名称
-            "HTTP/HTTPS 适配器 - 提供外部 HTTP 接口访问 AstrBot",  # 描述
-            default_config_tmpl={
-                "http_host": "0.0.0.0",
-                "http_port": 8080,
-                "api_prefix": "/api/v1",
-                "enable_http_api": True,
-                "auth_token": "",
-                "cors_origins": "*",
-            },
-            i18n_resources={
-                "zh-CN": {
-                    "http_host": {
-                        "description": "HTTP 监听主机",
-                        "hint": "HTTP 服务器监听的主机地址，0.0.0.0 表示所有网络接口",
-                    },
-                    "http_port": {
-                        "description": "HTTP 监听端口",
-                        "hint": "HTTP 服务器监听的端口号",
-                    },
-                    "api_prefix": {
-                        "description": "API 路径前缀",
-                        "hint": "所有 API 接口的 URL 前缀",
-                    },
-                    "enable_http_api": {
-                        "description": "启用 HTTP API",
-                        "hint": "是否启动 HTTP API 服务",
-                    },
-                    "auth_token": {
-                        "description": "认证令牌",
-                        "hint": "API 访问认证令牌，留空表示不启用认证",
-                    },
-                    "cors_origins": {
-                        "description": "CORS 允许的源",
-                        "hint": "跨域请求允许的来源，多个用逗号分隔，* 表示全部允许",
-                    },
-                },
-                "en-US": {
-                    "http_host": {
-                        "description": "HTTP listen host",
-                        "hint": "HTTP server listen host, 0.0.0.0 for all interfaces",
-                    },
-                    "http_port": {
-                        "description": "HTTP listen port",
-                        "hint": "HTTP server listen port",
-                    },
-                    "api_prefix": {
-                        "description": "API path prefix",
-                        "hint": "URL prefix for all API endpoints",
-                    },
-                    "enable_http_api": {
-                        "description": "Enable HTTP API",
-                        "hint": "Whether to start the HTTP API service",
-                    },
-                    "auth_token": {
-                        "description": "Auth token",
-                        "hint": "API access authentication token, leave empty to disable",
-                    },
-                    "cors_origins": {
-                        "description": "CORS allowed origins",
-                        "hint": "Allowed origins for CORS, comma separated, * for all",
-                    },
-                },
-            },
-            config_metadata={
-                "http_host": {
-                    "description": "HTTP 监听主机",
-                    "type": "string",
-                    "hint": "HTTP 服务器监听的主机地址，0.0.0.0 表示所有网络接口",
-                },
-                "http_port": {
-                    "description": "HTTP 监听端口",
-                    "type": "int",
-                    "hint": "HTTP 服务器监听的端口号",
-                },
-                "api_prefix": {
-                    "description": "API 路径前缀",
-                    "type": "string",
-                    "hint": "所有 API 接口的 URL 前缀",
-                },
-                "enable_http_api": {
-                    "description": "启用 HTTP API",
-                    "type": "bool",
-                    "hint": "是否启动 HTTP API 服务",
-                },
-                "auth_token": {
-                    "description": "认证令牌",
-                    "type": "string",
-                    "hint": "API 访问认证令牌，留空表示不启用认证",
-                },
-                "cors_origins": {
-                    "description": "CORS 允许的源",
-                    "type": "string",
-                    "hint": "跨域请求允许的来源，多个用逗号分隔，* 表示全部允许",
-                },
-            },
-        )(HTTPAdapter)
-
-    @staticmethod
-    def register_414():
-        register_platform_adapter(
-            "http_adapter",  # 适配器名称
-            "HTTP/HTTPS 适配器 - 提供外部 HTTP 接口访问 AstrBot",  # 描述
-            default_config_tmpl={
-                "http_host": "0.0.0.0",
-                "http_port": 8080,
-                "api_prefix": "/api/v1",
-                "enable_http_api": True,
-                "auth_token": "",
-                "cors_origins": "*",
-            }
-        )(HTTPAdapter)
 
     @filter.command_group("http")
     async def http(self, event: AstrMessageEvent):
