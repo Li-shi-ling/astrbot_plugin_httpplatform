@@ -79,9 +79,11 @@ class HTTPAdapterPlugin(Star):
 
     _registered: bool = False
 
-    def __init__(self, context: Context):
+    def _legacy_init_unused(self, context: Context):
         super().__init__(context)
         self.httpadapter = {}
+        # Register config metadata as early as possible after plugin load.
+        self._register_config()
 
         # 导入 HTTP 适配器以注册它
         # 装饰器会自动注册适配器
@@ -115,6 +117,14 @@ class HTTPAdapterPlugin(Star):
         except ImportError as e:
             logger.error(f"[HTTPAdapter] 导入 HTTP 适配器失败: {e}", exc_info=True)
             raise
+
+    def __init__(self, context: Context):
+        super().__init__(context)
+        self.httpadapter = {}
+        # Register config metadata as early as possible after plugin load.
+        self._register_config()
+        self._http_adapter_cls = HTTPAdapter
+        logger.info("[HTTPAdapter] HTTP adapter imported successfully")
 
     def _register_config(self):
         """注册配置信息到平台"""
