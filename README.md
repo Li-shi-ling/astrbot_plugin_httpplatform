@@ -316,3 +316,5 @@ fetch("http://localhost:8080/api/v1/messages", {
 # 🚀 AstrBot HTTP Platform
 
 为 AstrBot 提供强大而灵活的 HTTP 接口能力。
+
+[![Moe Counter](https://count.getloli.com/get/@li-shi-ling?theme=minecraft)](https://github.com/Li-shi-ling/astrbot_plugin_httpplatform)
