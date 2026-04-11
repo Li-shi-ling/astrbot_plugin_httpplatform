@@ -1,28 +1,29 @@
 """
 HTTP 适配器数据类定义
 """
+import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
-import asyncio
+from typing import Any
+
 
 @dataclass
 class HTTPRequestData:
     """HTTP 请求数据"""
     method: str
     url: str
-    headers: Dict[str, str]
-    remote_addr: Optional[str] = None
-    user_agent: Optional[str] = None
-    content_type: Optional[str] = None
-    accept: Optional[str] = None
+    headers: dict[str, str]
+    remote_addr: str | None = None
+    user_agent: str | None = None
+    content_type: str | None = None
+    accept: str | None = None
     timestamp: float = field(default_factory=time.time)
 
 @dataclass
 class HTTPResponseData:
     """HTTP 响应数据"""
     status: int
-    headers: Dict[str, str]
+    headers: dict[str, str]
     body: Any
     timestamp: float = field(default_factory=time.time)
 
@@ -33,7 +34,7 @@ class PendingResponse:
     future: asyncio.Future[Any]
     created_at: float = field(default_factory=time.time)
     timeout: int = 30
-    session_id: Optional[str] = None
+    session_id: str | None = None
 
 
 @dataclass
@@ -43,10 +44,10 @@ class SessionStats:
     created_at: float
     last_active: float
     message_count: int = 0
-    user_id: Optional[str] = None
-    username: Optional[str] = None
-    client_ip: Optional[str] = None
-    user_agent: Optional[str] = None
+    user_id: str | None = None
+    username: str | None = None
+    client_ip: str | None = None
+    user_agent: str | None = None
     is_active: bool = True
 
 

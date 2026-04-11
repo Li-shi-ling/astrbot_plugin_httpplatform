@@ -1,7 +1,9 @@
 """
 HTTP 适配器常量定义
 """
+
 from types import MappingProxyType
+
 # ==================== HTTP 消息类型常量 ====================
 HTTP_MESSAGE_TYPE = MappingProxyType({
     "MESSAGE": "message",

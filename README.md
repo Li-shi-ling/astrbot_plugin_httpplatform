@@ -1,129 +1,175 @@
----
+# astrbot_plugin_httpplatform
 
-# AstrBot HTTP Platform 插件
+为 AstrBot 提供 HTTP / HTTPS 接入能力，支持普通请求和 SSE 流式请求。
 
-## 📖 项目介绍
+## Features
 
-AstrBot HTTP Platform 是一个为 AstrBot 提供 **HTTP / HTTPS 接口能力** 的平台适配器插件。
+- Expose AstrBot through HTTP APIs
+- Support normal response and SSE streaming response
+- Accept multiple incoming message payload formats
+- Support bearer token authentication
+- Support CORS configuration
 
-通过该插件，外部应用可以通过标准 REST API 或 SSE 流式接口与 AstrBot 交互，实现：
+## Install
 
-* 🌐 Web 应用接入
-* 📱 移动端集成
-* 🖥 桌面客户端对接
-* 🔗 第三方系统集成
-* 🎛 远程控制与自动化
+### Plugin Market
 
----
+Search for `HTTP Platform` in the AstrBot plugin market and install it.
 
-# ✨ 功能特性
-
-## 核心能力
-
-* ✅ 标准 REST API
-* ✅ SSE 流式响应（Server-Sent Events）
-* ✅ 支持流式 / 非流式 两种调用模式
-* ✅ 会话管理
-* ✅ 鉴权机制（Bearer Token）
-* ✅ CORS 跨域支持
-* ✅ 请求日志记录
-* ✅ 超时控制
-
-## 技术特性
-
-* 🚀 异步高性能 HTTP 服务
-* 🔒 可选 Token 认证
-* ⚡ 低延迟流式输出
-* 📊 会话状态统计
-* 🔧 灵活配置
-
----
-
-# 📦 安装方法
-
-## 方法一：插件市场安装（推荐）
-
-1. 打开 AstrBot
-2. 进入插件市场
-3. 搜索 `HTTP Platform`
-4. 点击安装
-
----
-
-## 方法二：手动安装
+### Manual
 
 ```bash
 git clone https://github.com/Li-shi-ling/astrbot_plugin_httpplatform.git
 ```
 
-重启 AstrBot 即可。
+Place the plugin in the AstrBot plugin directory and restart AstrBot.
 
----
+## Config
 
-# ⚙ 配置说明
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `http_host` | `string` | `0.0.0.0` | HTTP server bind host |
+| `http_port` | `int` | `8080` | HTTP server bind port |
+| `api_prefix` | `string` | `/api/v1` | API path prefix |
+| `enable_http_api` | `bool` | `true` | Enable HTTP API |
+| `auth_token` | `string` | `""` | Bearer token, empty means disabled |
+| `cors_origins` | `string` | `*` | Allowed CORS origins, comma separated |
 
-| 配置项              | 类型  | 默认值      | 描述             |
-| ---------------- | --- | -------- | -------------- |
-| http_host        | 字符串 | 0.0.0.0  | 监听地址           |
-| http_port        | 整数  | 8080     | 监听端口           |
-| api_prefix       | 字符串 | /api/v1  | API 前缀         |
-| enable_http_api  | 布尔  | True     | 是否启用 HTTP      |
-| auth_token       | 字符串 | ""       | Bearer Token   |
-| cors_origins     | 字符串 | *        | 允许跨域来源         |
-| max_request_size | 整数  | 10485760 | 最大请求体（默认 10MB） |
-| request_timeout  | 整数  | 30       | 请求超时（秒）        |
-| session_timeout  | 整数  | 3600     | 会话超时           |
-| max_sessions     | 整数  | 1000     | 最大会话数          |
+## API
 
----
+Base URL:
 
-# 📡 API 文档
+```text
+http://<http_host>:<http_port><api_prefix>
+```
 
-## 基础信息
+Default value:
 
-* Base URL:
+```text
+http://127.0.0.1:8080/api/v1
+```
 
-  ```
-  http://localhost:8080/api/v1
-  ```
+Auth header when `auth_token` is configured:
 
-* 认证方式：
+```text
+Authorization: Bearer <auth_token>
+```
 
-  ```
-  Authorization: Bearer <auth_token>
-  ```
+### GET `/health`
 
-* Content-Type:
+Health check endpoint.
 
-  ```
-  application/json
-  ```
-
----
-
-# 1️⃣ 发送消息（标准 HTTP）
-
-### POST `/messages`
-
-## 请求体
+Example response:
 
 ```json
 {
-  "message": "你好，AstrBot！",
-  "platform": "http_test",
-  "user_id": "123456",
-  "nickname": "测试用户",
-  "timeout": 30
+  "status": "ok",
+  "service": "astrbot_http_adapter",
+  "timestamp": 1710000000.0,
+  "pending_responses": 0,
+  "version": "1.0.0"
 }
 ```
 
-`message` 现在支持三种输入：
+### POST `/message`
 
-1. 纯文本字符串
-2. 单个消息组件对象
-3. 消息组件数组
+Send a normal HTTP request and wait for the full response.
 
-图片消息示例：
+Minimal request:
+
+```json
+{
+  "message": "hello",
+  "platform": "http_test",
+  "user_id": "123456",
+  "nickname": "tester"
+}
+```
+
+Optional fields:
+
+- `session_id`: custom session id, default `<platform>_<user_id>`
+- `message_id`: custom message id
+- `timeout`: request timeout in seconds, default `30`
+
+Example response:
+
+```json
+{
+  "success": true,
+  "response": [
+    {
+      "content": {
+        "type": "text",
+        "data": {
+          "text": "hello"
+        }
+      },
+      "type": "ComponentType.Plain"
+    }
+  ],
+  "event_id": "f1d6d516-f95b-45b4-9f7f-4f80f2fef0c0",
+  "session_id": "http_test_123456",
+  "timestamp": 1710000000.0
+}
+```
+
+### POST `/message/stream`
+
+Send a request and receive SSE events.
+
+Example request:
+
+```json
+{
+  "message": "write a short introduction",
+  "platform": "http_test",
+  "user_id": "123456",
+  "nickname": "tester"
+}
+```
+
+Response content type:
+
+```text
+text/event-stream
+```
+
+Example SSE stream:
+
+```text
+event: connected
+data: {"event_id":"xxx","session_id":"http_test_123456"}
+
+event: message
+data: {"type":"message","data":{"content":{"type":"text","data":{"text":"Hello"}},"text_type":"ComponentType.Plain"}}
+
+event: message
+data: {"type":"message","data":{"content":{"type":"text","data":{"text":" world"}},"text_type":"ComponentType.Plain"}}
+
+event: end
+data: {"type":"end","data":{}}
+```
+
+## Supported Message Input Formats
+
+`message` supports these formats:
+
+1. Plain string
+2. Single AstrBot component object
+3. Mixed component array
+4. Shorthand object formats
+5. OpenAI-style content parts
+
+### 1. Plain string
+
+```json
+{
+  "message": "你好，AstrBot"
+}
+```
+
+### 2. Single component object
 
 ```json
 {
@@ -132,15 +178,11 @@ git clone https://github.com/Li-shi-ling/astrbot_plugin_httpplatform.git
     "data": {
       "url": "https://example.com/demo.png"
     }
-  },
-  "platform": "http_test",
-  "user_id": "123456",
-  "nickname": "image-user",
-  "timeout": 30
+  }
 }
 ```
 
-图文混合消息示例：
+### 3. Mixed component array
 
 ```json
 {
@@ -157,212 +199,184 @@ git clone https://github.com/Li-shi-ling/astrbot_plugin_httpplatform.git
         "url": "https://example.com/demo.png"
       }
     }
-  ],
-  "platform": "http_test",
-  "user_id": "123456",
-  "nickname": "mixed-user",
-  "timeout": 30
+  ]
 }
 ```
 
----
+### 4. Shorthand object formats
 
-## ✅ 标准 HTTP 返回（非流式）
-
-```json
-{
-  "event_id": "05735cd0-c08e-407c-81d8-0fdc842f831f",
-  "response": [
-    {
-      "content": {
-        "type": "text",
-        "data": {
-          "text": "你好！很高兴再次见到你。"
-        }
-      },
-      "type": "ComponentType.Plain"
-    }
-  ],
-  "session_id": "http_test_123456",
-  "success": true,
-  "timestamp": 1771423536.5876043
-}
-```
-
-> response 为组件数组，而不是字符串
-
----
-
-# 2️⃣ 流式发送消息（SSE）
-
-### POST `/messages/stream`
-
-返回类型：
-
-```
-Content-Type: text/event-stream
-```
-
----
-
-## ✅ 流式模式示例（SSE）
-
-```
-event: connected
-data: {"event_id":"xxx","session_id":"http_test_123456"}
-
-event: message
-data: {"type":"message","data":{"content":{"type":"text","data":{"text":"你好"}}},"text_type":"ComponentType.Plain"}
-
-event: message
-data: {"type":"message","data":{"content":{"type":"text","data":{"text":"！欢迎回来！"}}},"text_type":"ComponentType.Plain"}
-
-event: end
-data: {"type":"end","data":{}}
-```
-
----
-
-## 事件说明
-
-| 事件类型      | 说明   |
-| --------- | ---- |
-| connected | 建立连接 |
-| message   | 消息分片 |
-| end       | 正常结束 |
-| timeout   | 超时结束 |
-
----
-
-# 3️⃣ 获取会话信息
-
-### GET `/sessions/{session_id}`
+Text:
 
 ```json
 {
-  "ok": true,
-  "data": {
-    "session_id": "http_test_123456",
-    "created_at": "2024-01-01T00:00:00Z",
-    "last_activity": "2024-01-01T00:00:00Z",
-    "message_count": 5
+  "message": {
+    "text": "hello"
   }
 }
 ```
 
----
-
-# 4️⃣ 获取会话列表
-
-### GET `/sessions`
+Image:
 
 ```json
 {
-  "ok": true,
-  "data": [
+  "message": {
+    "image_url": "https://example.com/demo.png"
+  }
+}
+```
+
+Audio:
+
+```json
+{
+  "message": {
+    "audio_url": "https://example.com/demo.mp3"
+  }
+}
+```
+
+Video:
+
+```json
+{
+  "message": {
+    "video_url": "https://example.com/demo.mp4"
+  }
+}
+```
+
+File:
+
+```json
+{
+  "message": {
+    "file_url": "https://example.com/demo.pdf",
+    "name": "demo.pdf"
+  }
+}
+```
+
+### 5. OpenAI-style content parts
+
+Single message object:
+
+```json
+{
+  "message": {
+    "role": "user",
+    "content": [
+      {
+        "type": "input_text",
+        "text": "请分析这张图片"
+      },
+      {
+        "type": "input_image",
+        "image_url": "https://example.com/demo.png"
+      }
+    ]
+  }
+}
+```
+
+Content parts array:
+
+```json
+{
+  "message": [
     {
-      "session_id": "uuid1",
-      "created_at": "2024-01-01T00:00:00Z",
-      "last_activity": "2024-01-01T00:00:00Z",
-      "message_count": 5
+      "type": "input_text",
+      "text": "帮我总结文件内容"
+    },
+    {
+      "type": "input_file",
+      "file_url": "https://example.com/demo.pdf",
+      "filename": "demo.pdf"
     }
   ]
 }
 ```
 
----
+## Supported Component Types
 
-# 💻 使用示例
+Commonly supported input component types:
 
-## Python
+- `text`
+- `image`
+- `record`
+- `video`
+- `file`
+- `at`
+- `reply`
+- `poke`
+- `face`
+- `share`
+- `location`
+- `music`
+- `json`
+- `node`
+- `nodes`
+
+## Examples
+
+### cURL
+
+```bash
+curl -X POST "http://127.0.0.1:8080/api/v1/message" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"message\":\"hello\",\"platform\":\"http_test\",\"user_id\":\"123456\",\"nickname\":\"tester\"}"
+```
+
+### Python
 
 ```python
 import requests
 
-BASE_URL = "http://localhost:8080/api/v1"
+BASE_URL = "http://127.0.0.1:8080/api/v1"
 
-response = requests.post(
-    f"{BASE_URL}/messages",
-    json={
-        "message": "你好，AstrBot！",
-        "platform": "http_test",
-        "user_id": "123456",
-        "nickname": "测试用户"
-    }
-)
+payload = {
+    "message": [
+        {"type": "text", "data": {"text": "请解释这张图"}},
+        {"type": "image", "data": {"url": "https://example.com/demo.png"}},
+    ],
+    "platform": "http_test",
+    "user_id": "123456",
+    "nickname": "tester",
+}
 
-print(response.json())
+resp = requests.post(f"{BASE_URL}/message", json=payload, timeout=60)
+print(resp.json())
 ```
 
----
-
-## JavaScript
+### JavaScript
 
 ```javascript
-fetch("http://localhost:8080/api/v1/messages", {
-    method: "POST",
-    headers: {
-        "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-        message: "你好，AstrBot！",
-        platform: "http_test",
-        user_id: "123456",
-        nickname: "测试用户"
-    })
-})
-.then(res => res.json())
-.then(console.log);
+const payload = {
+  message: {
+    role: "user",
+    content: [
+      { type: "input_text", text: "Summarize this image" },
+      { type: "input_image", image_url: "https://example.com/demo.png" }
+    ]
+  },
+  platform: "http_test",
+  user_id: "123456",
+  nickname: "tester"
+};
+
+const resp = await fetch("http://127.0.0.1:8080/api/v1/message", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify(payload)
+});
+
+console.log(await resp.json());
 ```
 
----
+## Notes
 
-# 🔐 安全建议
-
-* 强烈建议配置 `auth_token`
-* 生产环境务必使用 HTTPS
-* 不要暴露到公网未加认证端口
-
----
-
-# ❓ 常见问题
-
-### Q: SSE 和普通 HTTP 区别？
-
-* `/messages` → 等待完整响应返回
-* `/messages/stream` → 实时返回分片
-
----
-
-### Q: response 为什么是数组？
-
-因为 AstrBot 返回的是组件结构
-
----
-
-# 🤝 贡献
-
-欢迎 PR / Issue！
-
----
-
-# 📄 许可证
-
-本项目采用 **GNU AFFERO GENERAL PUBLIC LICENSE v3**
-
----
-
-# 👤 作者
-
-* lishining
-* GitHub:
-  [https://github.com/Li-shi-ling/astrbot_plugin_httpplatform](https://github.com/Li-shi-ling/astrbot_plugin_httpplatform)
-* QQ群: 1083090761
-
----
-
-# 🚀 AstrBot HTTP Platform
-
-为 AstrBot 提供强大而灵活的 HTTP 接口能力。
-
-[![Moe Counter](https://count.getloli.com/get/@li-shi-ling?theme=minecraft)](https://github.com/Li-shi-ling/astrbot_plugin_httpplatform)
+- `message` cannot be empty
+- `timeout` must be a non-negative integer
+- In production, enable `auth_token` and use HTTPS
+- If a media object has no explicit `type`, the plugin will try to infer it from common fields like `url`, `file`, `path`, and file suffix

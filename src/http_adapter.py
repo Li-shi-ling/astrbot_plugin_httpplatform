@@ -1,20 +1,17 @@
 """
-HTTP/HTTPS Platform Adapter for AstrBot
-
-此适配器提供 HTTP/HTTPS 接口，让外部应用可以通过 HTTP 访问 AstrBot。
-内部会将 HTTP 请求转换为 WebSocket 通信，并将响应返回给 HTTP 客户端。
+HTTP/HTTPS platform adapter for AstrBot.
 """
 
 import asyncio
+import hmac
 import inspect
 import json
 import time
 import uuid
-from typing import Any, Dict, Optional
 from collections.abc import Coroutine
+from typing import Any
 
-import hmac
-from quart import Quart, request, jsonify, make_response
+from quart import Quart, jsonify, make_response, request
 from quart_cors import cors
 
 from astrbot.api import logger
@@ -30,11 +27,10 @@ from astrbot.api.platform import (
 )
 from astrbot.core.platform.astr_message_event import MessageSesion
 
-# 导入常量和数据类
 from .constants import HTTP_MESSAGE_TYPE, HTTP_STATUS_CODE
 from .dataclasses import HTTPRequestData, PendingResponse
 from .httpmessageevent import StandardHTTPMessageEvent, StreamHTTPMessageEvent
-from .tool import Json2BMC, Json2BMCChain
+from .tool import Json2BMC, normalize_message_payload
 
 HTTP_ADAPTER_DEFAULT_CONFIG_TMPL = {
     "http_host": "0.0.0.0",
@@ -135,7 +131,7 @@ HTTP_ADAPTER_CONFIG_METADATA = {
 
 try:
     _REGISTER_ADAPTER_PARAM_NAMES = set(
-        inspect.signature(register_platform_adapter).parameters
+        inspect.signature(register_platform_adapter).parameters,
     )
 except (TypeError, ValueError):
     _REGISTER_ADAPTER_PARAM_NAMES = set()
@@ -182,9 +178,9 @@ class HTTPAdapter(Platform):
         # 统计信息
         self.total_requests_processed = 0
         self.total_errors = 0
+        self.pending_responses: dict[str, PendingResponse] = {}
 
         # 会话管理
-        self.pending_responses: Dict[str, PendingResponse] = {}
 
         # Quart 应用
         self.app = Quart(__name__)
@@ -192,16 +188,25 @@ class HTTPAdapter(Platform):
         # 处理 CORS 来源配置
         cors_origins_config = platform_config.get("cors_origins", "*")
         if cors_origins_config == "*":
-            cors_origins_list = "*"
+            cors_origins_list: str | list[str] = "*"
         else:
-            cors_origins_list = cors_origins_config.split(",") if isinstance(cors_origins_config, str) else cors_origins_config
-
+            cors_origins_list = (
+                cors_origins_config.split(",")
+                if isinstance(cors_origins_config, str)
+                else cors_origins_config
+            )
         # 添加 CORS 支持 - 使用更全面的配置
         self.app = cors(
             self.app,
             allow_origin=cors_origins_list,
             allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-            allow_headers=["Content-Type", "Authorization", "Accept", "X-Request-ID", "Origin"],
+            allow_headers=[
+                "Content-Type",
+                "Authorization",
+                "Accept",
+                "X-Request-ID",
+                "Origin",
+            ],
             allow_credentials=False,
             expose_headers=["Content-Type", "Authorization", "X-Accel-Buffering"],
             max_age=86400,
@@ -221,13 +226,10 @@ class HTTPAdapter(Platform):
             support_streaming_message=True,
             support_proactive_message=False,
         )
-
-        self._background_tasks = set() # 用于追踪任务
-        
-        # 中断信号
+        self._background_tasks: set[asyncio.Task] = set() # 用于追踪任务
         self.shutdown_event = asyncio.Event()
 
-    def _start_task(self, coro: Coroutine):
+    def _start_task(self, coro: Coroutine) -> asyncio.Task:
         """统一管理后台任务，防止销毁报错"""
         task = asyncio.create_task(coro)
         self._background_tasks.add(task)
@@ -274,57 +276,66 @@ class HTTPAdapter(Platform):
     def meta(self) -> PlatformMetadata:
         return self._metadata
 
-    def _setup_routes(self):
+    def _setup_routes(self) -> None:
         """设置 HTTP 路由"""
 
         # OPTIONS 预检请求处理 - 确保所有路径都支持 OPTIONS
-        @self.app.route('/', defaults={'path': ''}, methods=['OPTIONS'])
-        @self.app.route('/<path:path>', methods=['OPTIONS'])
-        async def options_handler(path):
+        @self.app.route("/", defaults={"path": ""}, methods=["OPTIONS"])
+        @self.app.route("/<path:path>", methods=["OPTIONS"])
+        async def options_handler(path: str):
             """处理所有 OPTIONS 预检请求"""
-            response = await make_response('')
+            response = await make_response("")
             response.status_code = HTTP_STATUS_CODE["OK"]
 
             # quart-cors 会自动处理 CORS 头部，我们只需要返回空响应
             return response
 
         # 健康检查
-        @self.app.route(f'{self.api_prefix}/health', methods=['GET'])
+        @self.app.route(f"{self.api_prefix}/health", methods=["GET"])
         async def health_check():
             auth_result = await self._check_auth(request)
             if auth_result is not None:
                 return auth_result
-            return jsonify({
-                "status": "ok",
-                "service": "astrbot_http_adapter",
-                "timestamp": time.time(),
-                "pending_responses": len(self.pending_responses),
-                "version": "1.0.0"
-            })
+            return jsonify(
+                {
+                    "status": "ok",
+                    "service": "astrbot_http_adapter",
+                    "timestamp": time.time(),
+                    "pending_responses": len(self.pending_responses),
+                    "version": "1.0.0",
+                },
+            )
 
         # 发送消息接口
-        @self.app.route(f'{self.api_prefix}/message', methods=['POST', 'OPTIONS'])
+        @self.app.route(f"{self.api_prefix}/message", methods=["POST", "OPTIONS"])
         async def send_message():
             """发送消息到 AstrBot"""
-            if request.method == 'OPTIONS':
-                return '', HTTP_STATUS_CODE["OK"]
+            if request.method == "OPTIONS":
+                return "", HTTP_STATUS_CODE["OK"]
             return await self._handle_http_message(request)
 
         # 流式消息接口
-        @self.app.route(f'{self.api_prefix}/message/stream', methods=['POST', 'OPTIONS'])
+        @self.app.route(
+            f"{self.api_prefix}/message/stream",
+            methods=["POST", "OPTIONS"],
+        )
         async def send_message_stream():
             """流式发送消息到 AstrBot"""
-            if request.method == 'OPTIONS':
-                return '', HTTP_STATUS_CODE["OK"]
+            if request.method == "OPTIONS":
+                return "", HTTP_STATUS_CODE["OK"]
             return await self._handle_http_stream_message(request)
 
     def _get_component_summary(self, component: BaseMessageComponent) -> str:
         if isinstance(component, Plain):
             return component.text or ""
 
-        component_type = str(
-            getattr(component, "type", component.__class__.__name__),
-        ).split(".")[-1].lower()
+        component_type = (
+            str(
+                getattr(component, "type", component.__class__.__name__),
+            )
+            .split(".")[-1]
+            .lower()
+        )
         summary_map = {
             "image": "[图片]",
             "record": "[语音]",
@@ -344,7 +355,9 @@ class HTTPAdapter(Platform):
     ) -> str:
         parts = [
             part
-            for part in (self._get_component_summary(component) for component in components)
+            for part in (
+                self._get_component_summary(component) for component in components
+            )
             if part
         ]
         if parts:
@@ -357,21 +370,22 @@ class HTTPAdapter(Platform):
         self,
         message: Any,
     ) -> tuple[list[BaseMessageComponent], str]:
-        if isinstance(message, str):
-            return [Plain(text=message)], message
+        normalized_message = normalize_message_payload(message)
+        if len(normalized_message) == 1 and isinstance(normalized_message[0], str):
+            return [Plain(text=normalized_message[0])], normalized_message[0]
 
         components: list[BaseMessageComponent] = []
-        if isinstance(message, dict):
-            components = [Json2BMC(message)]
-        elif isinstance(message, list):
-            for item in message:
-                if isinstance(item, dict):
-                    components.append(Json2BMC(item))
-                elif isinstance(item, str):
-                    components.append(Plain(text=item))
-                elif item is not None:
-                    components.append(Plain(text=str(item)))
-        else:
+        for item in normalized_message:
+            if isinstance(item, BaseMessageComponent):
+                components.append(item)
+            elif isinstance(item, dict):
+                components.append(Json2BMC(item))
+            elif isinstance(item, str):
+                components.append(Plain(text=item))
+            elif item is not None:
+                components.append(Plain(text=str(item)))
+
+        if not components:
             coerced_message = str(message)
             return [Plain(text=coerced_message)], coerced_message
 
@@ -383,13 +397,16 @@ class HTTPAdapter(Platform):
         auth_result = await self._check_auth(request_obj)
         if auth_result is not None:
             return auth_result
-        future = None
-        event_id = None
+
+        future: asyncio.Future | None = None
+        event_id: str | None = None
         try:
             # 获取请求数据
             data = await request_obj.get_json()
             if not data:
-                return jsonify({"error": "无效的请求数据"}), HTTP_STATUS_CODE["BAD_REQUEST"]
+                return jsonify({"error": "invalid request body"}), HTTP_STATUS_CODE[
+                    "BAD_REQUEST"
+                ]
 
             # 收集请求头信息
             headers = dict(request_obj.headers)
@@ -398,22 +415,29 @@ class HTTPAdapter(Platform):
                 url=request_obj.url,
                 headers=headers,
                 remote_addr=request_obj.remote_addr,
-                user_agent=request_obj.user_agent.string if request_obj.user_agent else None,
+                user_agent=request_obj.user_agent.string
+                if request_obj.user_agent
+                else None,
                 content_type=request_obj.content_type,
-                accept=request_obj.headers.get('Accept')
+                accept=request_obj.headers.get("Accept"),
             )
 
             # 必需参数检查
-            message = data.get('message', None)
+            message = data.get("message")
             if not message:
-                return jsonify({"error": "message 参数是必需的"}), HTTP_STATUS_CODE["BAD_REQUEST"]
+                return jsonify(
+                    {"error": "message parameter is required"}
+                ), HTTP_STATUS_CODE["BAD_REQUEST"]
+
             messages, message_str = self._parse_incoming_message(message)
             if not messages:
-                return jsonify({"error": "message 参数是必需的"}), HTTP_STATUS_CODE["BAD_REQUEST"]
+                return jsonify(
+                    {"error": "message parameter is required"}
+                ), HTTP_STATUS_CODE["BAD_REQUEST"]
             # 获取会话ID或创建新的
-            platform = data.get('platform', "")
-            user_id = data.get('user_id', '0')
-            nickname = data.get('nickname', '外部用户')
+            platform = data.get("platform", "")
+            user_id = data.get("user_id", "0")
+            nickname = data.get("nickname", "external-user")
             session_id = str(data.get("session_id") or f"{platform}_{user_id}")
 
             # 创建事件并提交
@@ -423,19 +447,16 @@ class HTTPAdapter(Platform):
             self.pending_responses[event_id] = PendingResponse(
                 future=future,
                 session_id=session_id,
-                timeout=data.get('timeout', 30)
+                timeout=data.get("timeout", 30),
             )
 
             # 创建消息对象
             abm = AstrBotMessage()
             abm.self_id = str(self._metadata.id)
-            abm.sender = MessageMember(
-                user_id=str(user_id),
-                nickname=nickname,
-            )
+            abm.sender = MessageMember(user_id=str(user_id), nickname=nickname)
             abm.type = MessageType.GROUP_MESSAGE
             abm.session_id = session_id
-            abm.message_id = data.get('message_id', str(uuid.uuid4().hex))
+            abm.message_id = data.get("message_id", str(uuid.uuid4().hex))
             abm.message = messages
             abm.message_str = message_str
             abm.raw_message = data
@@ -449,7 +470,7 @@ class HTTPAdapter(Platform):
                 session_id=session_id,
                 adapter=self,
                 event_id=event_id,
-                request_data=request_data
+                request_data=request_data,
             )
 
             # 设置额外信息
@@ -465,43 +486,38 @@ class HTTPAdapter(Platform):
             self.total_requests_processed += 1
 
             # 等待响应
-            try:
-                timeout = data.get('timeout', 30)
-                if not isinstance(timeout, int):
-                    logger.error(f"[HTTPAdapter] 不兼容的 timeout:{timeout} 尝试转变为 int")
-                    try:
-                        timeout = int(timeout)
-                    except:
-                        logger.error(f"[HTTPAdapter] 转变为 int 失败,使用 30")
-                        timeout = 30
-                if timeout < 0:
-                    logger.error(f"[HTTPAdapter] timeout:{timeout} < 0 使用 30")
+            timeout = data.get("timeout", 30)
+            if not isinstance(timeout, int):
+                try:
+                    timeout = int(timeout)
+                except Exception:
+                    logger.error("[HTTPAdapter] 转变为 int 失败,使用 30")
                     timeout = 30
-                response = await asyncio.wait_for(future, timeout=timeout)
+            if timeout < 0:
+                logger.error(f"[HTTPAdapter] timeout:{timeout} < 0 使用 30")
+                timeout = 30
 
-                # 构建响应
-                response_data = {
-                    "success": True,
-                    "response": response,
-                    "event_id": event_id,
-                    "session_id": session_id,
-                    "timestamp": time.time()
-                }
+            response = await asyncio.wait_for(future, timeout=timeout)
 
-                # 添加消息ID
-                if 'message_id' in data:
-                    response_data['message_id'] = data['message_id']
+            # 构建响应
+            response_data = {
+                "success": True,
+                "response": response,
+                "event_id": event_id,
+                "session_id": session_id,
+                "timestamp": time.time(),
+            }
+            # 添加消息ID
+            if "message_id" in data:
+                response_data["message_id"] = data["message_id"]
+            return jsonify(response_data)
 
-                return jsonify(response_data)
-
-            except asyncio.TimeoutError:
-                if event_id in self.pending_responses:
-                    self.pending_responses.pop(event_id, None)
-                return jsonify({
-                    "error": "请求超时",
-                    "event_id": event_id
-                }), HTTP_STATUS_CODE["TIMEOUT"]
-
+        except asyncio.TimeoutError:
+            if event_id in self.pending_responses:
+                self.pending_responses.pop(event_id, None)
+            return jsonify(
+                {"error": "请求超时", "event_id": event_id}
+            ), HTTP_STATUS_CODE["TIMEOUT"]
         except json.JSONDecodeError:
             self.total_errors += 1
             return jsonify({"error": "无效的 JSON 数据"}), HTTP_STATUS_CODE["BAD_REQUEST"]
@@ -509,10 +525,14 @@ class HTTPAdapter(Platform):
             self.total_errors += 1
             if future and not future.done():
                 future.set_exception(e)
-            logger.error(f"[HTTPAdapter] 处理HTTP请求时出错: {e}", exc_info=True)
-            return jsonify({"error": f"内部服务器错误: {str(e)}"}), HTTP_STATUS_CODE["INTERNAL_ERROR"]
+            logger.error(
+                f"[HTTPAdapter] 处理HTTP请求时出错: {e}", exc_info=True
+            )
+            return jsonify(
+                {"error": f"内部服务器错误: {str(e)}"}
+            ), HTTP_STATUS_CODE["INTERNAL_ERROR"]
         finally:
-            if not event_id is None:
+            if event_id is not None:
                 self.pending_responses.pop(event_id, None)
 
     async def _handle_http_stream_message(self, request_obj) -> Any:
@@ -527,71 +547,65 @@ class HTTPAdapter(Platform):
             if not data:
                 return jsonify({"error": "无效的请求数据"}), HTTP_STATUS_CODE["BAD_REQUEST"]
 
-            message = data.get('message')
+            message = data.get("message")
             if not message:
                 return jsonify({"error": "message 参数是必需的"}), HTTP_STATUS_CODE["BAD_REQUEST"]
-            if isinstance(message, dict):
-                message = [message]
-            elif not isinstance(message, (str, list)):
-                message = str(message)
-            if isinstance(message, list):
-                messages = Json2BMCChain(message)
-            else:
-                # 如果是字符串，包装成 Plain 消息
-                from astrbot.api.message_components import Plain
-                messages = [Plain(text=str(message))]
-            # 收集请求头信息
+
+            messages, message_str = self._parse_incoming_message(message)
+            if not messages:
+                return jsonify(
+                    {"error": "message 不存在"}
+                ), HTTP_STATUS_CODE["BAD_REQUEST"]
+
             headers = dict(request_obj.headers)
             request_data = HTTPRequestData(
                 method=request_obj.method,
                 url=request_obj.url,
                 headers=headers,
                 remote_addr=request_obj.remote_addr,
-                user_agent=request_obj.user_agent.string if request_obj.user_agent else None,
+                user_agent=request_obj.user_agent.string
+                if request_obj.user_agent
+                else None,
                 content_type=request_obj.content_type,
-                accept=request_obj.headers.get('Accept')
+                accept=request_obj.headers.get("Accept"),
             )
 
-            platform = data.get('platform', "")
-            user_id = data.get('user_id', '0')
-            username = data.get('username', '外部用户')
+            platform = data.get("platform", "")
+            user_id = data.get("user_id", "0")
+            username = data.get("username") or data.get("nickname", "外部用户")
             session_id = str(data.get("session_id") or f"{platform}_{user_id}")
 
             # 创建 SSE 响应生成器
             async def generate():
                 event_id = str(uuid.uuid4())
-                queue = asyncio.Queue(maxsize=100)  # 增加队列大小
+                queue: asyncio.Queue = asyncio.Queue(maxsize=100)  # 增加队列大小
 
                 # 创建消息对象
                 abm = AstrBotMessage()
                 abm.self_id = str(self._metadata.id)
-                abm.sender = MessageMember(
-                    user_id=str(user_id),
-                    nickname=username,
-                )
+                abm.sender = MessageMember(user_id=str(user_id), nickname=username)
                 abm.type = MessageType.GROUP_MESSAGE
                 abm.session_id = session_id
                 abm.message_id = str(uuid.uuid4().hex)
                 abm.message = messages
-                abm.message_str = self._build_message_summary(messages, message)
+                abm.message_str = message_str
                 abm.raw_message = data
                 abm.timestamp = int(time.time())
 
                 # 创建事件
                 event = StreamHTTPMessageEvent(
-                    message_str=self._build_message_summary(messages, message),
+                    message_str=message_str,
                     message_obj=abm,
                     platform_meta=self._metadata,
                     session_id=session_id,
                     adapter=self,
                     queue=queue,
                     event_id=event_id,
-                    request_data=request_data
+                    request_data=request_data,
                 )
 
                 # 设置额外信息
                 event.set_extra("data", data)
-
                 event.is_wake = True
                 event.is_at_or_wake_command = True
 
@@ -602,20 +616,24 @@ class HTTPAdapter(Platform):
                 self.total_requests_processed += 1
 
                 # 生成 SSE 流
-                yield f"event: {HTTP_MESSAGE_TYPE['CONNECTED']}\ndata: {json.dumps({'event_id': event_id, 'session_id': session_id})}\n\n"
+                yield (
+                    f"event: {HTTP_MESSAGE_TYPE['CONNECTED']}\n"
+                    f"data: {json.dumps({'event_id': event_id, 'session_id': session_id}, ensure_ascii=False)}\n\n"
+                )
 
                 # 设置超时参数
-                timeout = data.get('timeout', 600)  # 增加到10分钟，支持长对话
+                timeout = data.get("timeout", 600)  # 增加到10分钟，支持长对话
                 if not isinstance(timeout, int):
                     logger.error(f"[HTTPAdapter] 不兼容的 timeout:{timeout} 尝试转变为 int")
                     try:
                         timeout = int(timeout)
-                    except:
-                        logger.error(f"[HTTPAdapter] 转变为 int 失败,使用 600")
+                    except Exception:
+                        logger.error("[HTTPAdapter] 转变为 int 失败,使用 600")
                         timeout = 600
                 if timeout < 0:
                     logger.error(f"[HTTPAdapter] timeout:{timeout} < 0 使用 600")
                     timeout = 600
+
                 heartbeat_interval = data.get("heartbeat_interval", 10)
                 if not isinstance(heartbeat_interval, int):
                     try:
@@ -636,7 +654,7 @@ class HTTPAdapter(Platform):
                         if current_time - start_time > timeout:
                             yield (
                                 f"event: {HTTP_MESSAGE_TYPE['TIMEOUT']}\n"
-                                f"data: {json.dumps({'reason': 'total_timeout', 'duration': current_time - start_time})}\n\n"
+                                f"data: {json.dumps({'reason': 'total_timeout', 'duration': current_time - start_time}, ensure_ascii=False)}\n\n"
                             )
                             break
 
@@ -649,40 +667,35 @@ class HTTPAdapter(Platform):
                         try:
                             # 等待队列消息，使用短超时以便检查其他条件
                             item = await asyncio.wait_for(queue.get(), timeout=1.0)
-
                             try:
                                 if item is None:
                                     # None 是特殊的结束信号
                                     yield (
                                         f"event: {HTTP_MESSAGE_TYPE['END']}\n"
-                                        f"data: {json.dumps({'reason': 'normal_end'})}\n\n"
+                                        f"data: {json.dumps({'reason': 'normal_end'}, ensure_ascii=False)}\n\n"
                                     )
                                     received_end_event = True
                                     break
 
                                 # 处理事件
-                                event_type = item.get('type')
-
+                                event_type = item.get("type")
                                 # 更新最后活动时间
                                 last_activity_time = time.time()
 
                                 # 发送事件
                                 yield (
-                                    f"event: {item.get('type')}\n"
+                                    f"event: {event_type}\n"
                                     f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
                                 )
-
                                 # 如果是 end 事件，结束循环
-                                if event_type == HTTP_MESSAGE_TYPE['END']:
+                                if event_type == HTTP_MESSAGE_TYPE["END"]:
                                     received_end_event = True
                                     break
                             finally:
                                 queue.task_done()
-
                         except asyncio.TimeoutError:
                             # 超时是正常的，继续循环检查其他条件
                             continue
-
                 except asyncio.CancelledError:
                     # 连接被取消
                     logger.info(f"[HTTPAdapter] SSE连接被取消: {event_id}")
@@ -698,15 +711,14 @@ class HTTPAdapter(Platform):
                         event._is_streaming = False
                     logger.info(f"[HTTPAdapter] SSE连接结束: {event_id}, 会话: {session_id}")
 
-            headers = {
-                'Content-Type': 'text/event-stream',
-                'Cache-Control': 'no-cache',
-                'Connection': 'keep-alive',
-                'X-Accel-Buffering': 'no',  # 禁用Nginx缓冲
-                'X-Accel-Timeout': '1200',  # Nginx代理超时时间
+            response_headers = {
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # 禁用Nginx缓冲
+                "X-Accel-Timeout": "1200",  # Nginx代理超时时间
             }
-
-            return generate(), HTTP_STATUS_CODE["OK"], headers
+            return generate(), HTTP_STATUS_CODE["OK"], response_headers
 
         except json.JSONDecodeError:
             self.total_errors += 1
@@ -716,13 +728,13 @@ class HTTPAdapter(Platform):
             logger.error(f"[HTTPAdapter] 处理流式请求时出错: {e}", exc_info=True)
             return jsonify({"error": f"内部服务器错误: {str(e)}"}), HTTP_STATUS_CODE["INTERNAL_ERROR"]
 
-    async def _check_auth(self, request_obj) -> Optional[Any]:
+    async def _check_auth(self, request_obj) -> Any | None:
         """检查鉴权"""
         if not self.auth_token:
             return None
 
-        auth_header = request_obj.headers.get('Authorization')
-        if not auth_header or not auth_header.startswith('Bearer '):
+        auth_header = request_obj.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
             return jsonify({"error": "未授权访问"}), HTTP_STATUS_CODE["UNAUTHORIZED"]
 
         token = auth_header[7:]
@@ -770,9 +782,12 @@ class HTTPAdapter(Platform):
             config.use_reloader = False
             # 禁用 Hypercorn 的信号处理，让我们自己处理
             config.signal_handlers = False
-            
-            await hypercorn.asyncio.serve(self.app, config, shutdown_trigger=self.shutdown_event.wait)
 
+            await hypercorn.asyncio.serve(
+                self.app,
+                config,
+                shutdown_trigger=self.shutdown_event.wait,
+            )
         except Exception as e:
             logger.error(f"[HTTPAdapter] HTTP 服务器启动失败: {e}", exc_info=True)
             self._running = False
@@ -789,25 +804,16 @@ class HTTPAdapter(Platform):
         if self._background_tasks:
             for task in list(self._background_tasks):
                 task.cancel()
-
-            await asyncio.gather(
-                *self._background_tasks,
-                return_exceptions=True
-            )
-
+            await asyncio.gather(*self._background_tasks, return_exceptions=True)
             self._background_tasks.clear()
 
         # 取消所有等待中的响应
         if self.pending_responses:
             exc = asyncio.CancelledError("适配器终止")
-            for event_id, pending in list(self.pending_responses.items()):
+            for _, pending in list(self.pending_responses.items()):
                 self._set_future_exception_safely(pending.future, exc)
-
             self.pending_responses.clear()
 
         # 调用父类终止
         await super().terminate()
-
         logger.info("[HTTPAdapter] 适配器已安全终止")
-
-
