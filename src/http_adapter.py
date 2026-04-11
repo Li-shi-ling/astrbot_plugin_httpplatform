@@ -19,7 +19,7 @@ from quart_cors import cors
 
 from astrbot.api import logger
 from astrbot.api.event import MessageChain
-from astrbot.api.message_components import Plain
+from astrbot.api.message_components import BaseMessageComponent, Plain
 from astrbot.api.platform import (
     AstrBotMessage,
     MessageMember,
@@ -34,7 +34,7 @@ from astrbot.core.platform.astr_message_event import MessageSesion
 from .constants import HTTP_MESSAGE_TYPE, HTTP_STATUS_CODE
 from .dataclasses import HTTPRequestData, PendingResponse
 from .httpmessageevent import StandardHTTPMessageEvent, StreamHTTPMessageEvent
-from .tool import Json2BMCChain
+from .tool import Json2BMC, Json2BMCChain
 
 HTTP_ADAPTER_DEFAULT_CONFIG_TMPL = {
     "http_host": "0.0.0.0",
@@ -318,6 +318,65 @@ class HTTPAdapter(Platform):
                 return '', HTTP_STATUS_CODE["OK"]
             return await self._handle_http_stream_message(request)
 
+    def _get_component_summary(self, component: BaseMessageComponent) -> str:
+        if isinstance(component, Plain):
+            return component.text or ""
+
+        component_type = str(
+            getattr(component, "type", component.__class__.__name__),
+        ).split(".")[-1].lower()
+        summary_map = {
+            "image": "[图片]",
+            "record": "[语音]",
+            "video": "[视频]",
+            "file": "[文件]",
+            "face": "[表情]",
+            "reply": "[回复]",
+            "forward": "[转发]",
+            "json": "[JSON]",
+        }
+        return summary_map.get(component_type, f"[{component_type}]")
+
+    def _build_message_summary(
+        self,
+        components: list[BaseMessageComponent],
+        fallback: Any,
+    ) -> str:
+        parts = [
+            part
+            for part in (self._get_component_summary(component) for component in components)
+            if part
+        ]
+        if parts:
+            return "".join(parts)
+        if isinstance(fallback, str):
+            return fallback
+        return json.dumps(fallback, ensure_ascii=False)
+
+    def _parse_incoming_message(
+        self,
+        message: Any,
+    ) -> tuple[list[BaseMessageComponent], str]:
+        if isinstance(message, str):
+            return [Plain(text=message)], message
+
+        components: list[BaseMessageComponent] = []
+        if isinstance(message, dict):
+            components = [Json2BMC(message)]
+        elif isinstance(message, list):
+            for item in message:
+                if isinstance(item, dict):
+                    components.append(Json2BMC(item))
+                elif isinstance(item, str):
+                    components.append(Plain(text=item))
+                elif item is not None:
+                    components.append(Plain(text=str(item)))
+        else:
+            coerced_message = str(message)
+            return [Plain(text=coerced_message)], coerced_message
+
+        return components, self._build_message_summary(components, message)
+
     async def _handle_http_message(self, request_obj) -> Any:
         """处理 HTTP 消息请求"""
         # 鉴权
@@ -348,9 +407,9 @@ class HTTPAdapter(Platform):
             message = data.get('message', None)
             if not message:
                 return jsonify({"error": "message 参数是必需的"}), HTTP_STATUS_CODE["BAD_REQUEST"]
-            messages = None
-            if isinstance(message, list):
-                messages = Json2BMCChain(message)
+            messages, message_str = self._parse_incoming_message(message)
+            if not messages:
+                return jsonify({"error": "message 参数是必需的"}), HTTP_STATUS_CODE["BAD_REQUEST"]
             # 获取会话ID或创建新的
             platform = data.get('platform', "")
             user_id = data.get('user_id', '0')
@@ -377,17 +436,14 @@ class HTTPAdapter(Platform):
             abm.type = MessageType.GROUP_MESSAGE
             abm.session_id = session_id
             abm.message_id = data.get('message_id', str(uuid.uuid4().hex))
-            if messages is None:
-                abm.message = [Plain(text=message)]
-            else:
-                abm.message = messages
-            abm.message_str = message if isinstance(message, str) else json.dumps(message, ensure_ascii=False)
+            abm.message = messages
+            abm.message_str = message_str
             abm.raw_message = data
             abm.timestamp = int(time.time())
 
             # 创建事件
             event = StandardHTTPMessageEvent(
-                message_str=message,
+                message_str=message_str,
                 message_obj=abm,
                 platform_meta=self._metadata,
                 session_id=session_id,
@@ -474,6 +530,10 @@ class HTTPAdapter(Platform):
             message = data.get('message')
             if not message:
                 return jsonify({"error": "message 参数是必需的"}), HTTP_STATUS_CODE["BAD_REQUEST"]
+            if isinstance(message, dict):
+                message = [message]
+            elif not isinstance(message, (str, list)):
+                message = str(message)
             if isinstance(message, list):
                 messages = Json2BMCChain(message)
             else:
@@ -513,13 +573,13 @@ class HTTPAdapter(Platform):
                 abm.session_id = session_id
                 abm.message_id = str(uuid.uuid4().hex)
                 abm.message = messages
-                abm.message_str = message if isinstance(message, str) else json.dumps(message, ensure_ascii=False)
+                abm.message_str = self._build_message_summary(messages, message)
                 abm.raw_message = data
                 abm.timestamp = int(time.time())
 
                 # 创建事件
                 event = StreamHTTPMessageEvent(
-                    message_str=message,
+                    message_str=self._build_message_summary(messages, message),
                     message_obj=abm,
                     platform_meta=self._metadata,
                     session_id=session_id,

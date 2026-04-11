@@ -117,6 +117,54 @@ git clone https://github.com/Li-shi-ling/astrbot_plugin_httpplatform.git
 }
 ```
 
+`message` 现在支持三种输入：
+
+1. 纯文本字符串
+2. 单个消息组件对象
+3. 消息组件数组
+
+图片消息示例：
+
+```json
+{
+  "message": {
+    "type": "image",
+    "data": {
+      "url": "https://example.com/demo.png"
+    }
+  },
+  "platform": "http_test",
+  "user_id": "123456",
+  "nickname": "image-user",
+  "timeout": 30
+}
+```
+
+图文混合消息示例：
+
+```json
+{
+  "message": [
+    {
+      "type": "text",
+      "data": {
+        "text": "请描述这张图"
+      }
+    },
+    {
+      "type": "image",
+      "data": {
+        "url": "https://example.com/demo.png"
+      }
+    }
+  ],
+  "platform": "http_test",
+  "user_id": "123456",
+  "nickname": "mixed-user",
+  "timeout": 30
+}
+```
+
 ---
 
 ## ✅ 标准 HTTP 返回（非流式）
