@@ -173,7 +173,11 @@ def normalize_message_payload(message: Any) -> list[Any]:
 
     msg_type = str(message.get("type", "")).lower()
     if msg_type in {"text", "input_text"}:
-        return [{"type": "text", "data": {"text": message.get("text", "")}}]
+        data = message.get("data")
+        text = message.get("text", "")
+        if text == "" and isinstance(data, dict):
+            text = data.get("text", "")
+        return [{"type": "text", "data": {"text": text}}]
     if msg_type in {"image_url", "input_image", "input_image_url"}:
         image_url = message.get("image_url", "")
         if isinstance(image_url, dict):
@@ -314,7 +318,11 @@ def Json2BMC(data: dict[str, Any]) -> BaseMessageComponent:
 
     if component_class is Video:
         return Video(
-            file=data_content.get("file", ""),
+            file=(
+                data_content.get("file")
+                or data_content.get("url")
+                or data_content.get("path", "")
+            ),
             cover=data_content.get("cover", ""),
             path=data_content.get("path", ""),
         )
