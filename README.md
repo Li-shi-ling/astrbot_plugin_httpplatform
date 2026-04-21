@@ -569,4 +569,5 @@ console.log(await resp.json());
 
 为 AstrBot 提供灵活、易接入、适合二次开发的 HTTP 接口能力。
 
-  [https://github.com/Li-shi-ling/astrbot_plugin_httpplatform](https://github.com/Li-shi-ling/astrbot_plugin_httpplatform)
+[![Moe Counter](https://count.getloli.com/get/@li-shi-ling?theme=minecraft)](https://github.com/Li-shi-ling/astrbot_plugin_httpplatform)
+
