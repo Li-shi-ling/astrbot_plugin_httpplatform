@@ -100,6 +100,34 @@ def _infer_media_type_from_value(value: str) -> str | None:
     return None
 
 
+def _serialize_component_for_http(data: BaseMessageComponent) -> dict[Any, Any]:
+    if isinstance(data, Plain):
+        return {"type": "text", "data": {"text": data.text}}
+    if isinstance(data, Node):
+        return {
+            "type": "node",
+            "data": {
+                "id": data.id,
+                "name": data.name,
+                "uin": data.uin,
+                "content": [
+                    _serialize_component_for_http(component)
+                    for component in (data.content or [])
+                ],
+            },
+        }
+    if isinstance(data, Nodes):
+        return {
+            "type": "nodes",
+            "data": {
+                "nodes": [
+                    _serialize_component_for_http(node) for node in (data.nodes or [])
+                ],
+            },
+        }
+    return data.toDict()
+
+
 def _flatten_openai_content_parts(parts: list[Any]) -> list[Any]:
     normalized: list[Any] = []
     for part in parts:
@@ -268,9 +296,7 @@ def BMC2Dict(data: BaseMessageComponent) -> tuple[dict[Any, Any], str]:
     Returns:
         tuple: (Dict, 类型字符串)
     """
-    if isinstance(data, Plain):
-        return {"type": "text", "data": {"text": data.text}}, str(data.type)
-    return data.toDict(), str(data.type)
+    return _serialize_component_for_http(data), str(data.type)
 
 
 # Dict类列表转变为BMC
