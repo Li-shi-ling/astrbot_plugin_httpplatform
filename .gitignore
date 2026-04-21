@@ -209,3 +209,12 @@ __marimo__/
 # My
 cs/
 参考/
+.idea/
+test/
+CLAUDE.md
+.pipeline-workspace
+docs
+runtime/
+run_remote_http_test.bat
+simulator/
+old_readme.md

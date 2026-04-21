@@ -243,6 +243,7 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
         self._stream_complete = None
         self._stream_complete_loop = None
         self._last_overflow_log = 0.0
+        self._end_signal_sent = False
         self.set_extra("streaming", True)
         self._finalcall = False
 
@@ -340,6 +341,8 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             self._get_stream_complete_event().set()
 
     async def send_end_signal(self):
+        if self._end_signal_sent:
+            return
         """
         发送流式结束信号 - 专门用于在 on_llm_response 中调用
         """
@@ -359,6 +362,8 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
         })
         if not success:
             self._is_streaming = False
+            return
+        self._end_signal_sent = True
         logger.debug(f"[StreamHTTPMessageEvent] 已发送结束信号 (event_id: {self.event_id})")
 
     def set_final_call(self):
@@ -379,14 +384,14 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
             merged_text = "".join(text_buffer)
             text_buffer = []
             text_buffer_len = 0
-            buffer_type = text_buffer_type or "plain"
+            buffer_text_type = text_buffer_type or "ComponentType.Plain"
             text_buffer_type = None
             last_flush_time = time.monotonic()
             return await self._safe_put(
                 {
                     "type": HTTP_MESSAGE_TYPE["MESSAGE"],
-                    "data": {"content": {"type": buffer_type, "data": {"text": merged_text}}},
-                    "text_type": buffer_type,
+                    "data": {"content": {"type": "text", "data": {"text": merged_text}}},
+                    "text_type": buffer_text_type,
                 },
             )
 
@@ -396,9 +401,10 @@ class StreamHTTPMessageEvent(HTTPMessageEvent):
                 break
             for message in message_chain.chain:
                 response_text, text_type = BMC2Dict(message)
+                normalized_text_type = str(text_type).split(".")[-1].lower()
 
                 is_plain = (
-                    str(text_type).lower() in {"plain", "text"}
+                    normalized_text_type in {"plain", "text"}
                     and isinstance(response_text, dict)
                     and isinstance((response_text.get("data") or {}).get("text"), str)
                 )

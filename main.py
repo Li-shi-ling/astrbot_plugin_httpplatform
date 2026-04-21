@@ -16,13 +16,15 @@ import sys
 from pathlib import Path
 from types import MethodType
 
-from astrbot.api.star import Context, Star
-from astrbot.api.event import AstrMessageEvent, filter
-from astrbot.core.config.default import CONFIG_METADATA_2
 from astrbot.api import logger
+from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.provider import LLMResponse
+from astrbot.api.star import Context, Star
+from astrbot.core.config.default import CONFIG_METADATA_2
+
 from .src.http_adapter import HTTPAdapter
 from .src.httpmessageevent import StandardHTTPMessageEvent, StreamHTTPMessageEvent
+
 
 # ==================== HTTP 适配器插件 ====================
 class HTTPAdapterPlugin(Star):
@@ -277,7 +279,7 @@ class HTTPAdapterPlugin(Star):
         for platform in self.context.platform_manager.platform_insts:
             if isinstance(platform, self._http_adapter_cls):
                 meta = platform.meta()
-                if hasattr(meta, 'id'):
+                if hasattr(meta, "id"):
                     platform_id = meta.id
                 else:
                     platform_id = None
