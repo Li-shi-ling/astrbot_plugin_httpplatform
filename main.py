@@ -1,15 +1,3 @@
-"""
-AstrBot HTTP Adapter 示例程序
-
-这个示例展示如何使用 HTTP 适配器为 AstrBot 提供外部 HTTP 接口。
-通过 HTTP 适配器，外部应用可以通过 HTTP/HTTPS 协议访问 AstrBot。
-
-主要功能：
-1. 启动 HTTP 服务器，提供 REST API 接口
-2. 提供会话管理和统计信息
-3. 完整的鉴权和安全控制
-"""
-
 import json
 import sqlite3
 import sys
