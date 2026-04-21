@@ -1,14 +1,10 @@
 # AstrBot HTTP Platform 插件
 
----
-
 ## 项目介绍
 
 AstrBot HTTP Platform 是一个为 AstrBot 提供 **HTTP / HTTPS 接入能力** 的平台适配插件。
 
 通过该插件，外部应用可以使用标准 HTTP API 或 SSE 流式接口与 AstrBot 进行交互，适合以下场景：
-
----
 
 ## 功能特性
 
@@ -23,16 +19,6 @@ AstrBot HTTP Platform 是一个为 AstrBot 提供 **HTTP / HTTPS 接入能力** 
 * 支持请求超时控制
 * 支持健康检查接口
 
-### 技术特点
-
-* 异步 HTTP 服务
-* 接口结构清晰，便于二次集成
-* 可直接接入 Web 前端、脚本、自动化平台
-* 兼容文本、图片、音频、文件等多类消息输入
-* 对 OpenAI 风格内容片段格式提供兼容支持
-
----
-
 ## 安装方法
 
 ### 方法一：插件市场安装
@@ -42,8 +28,6 @@ AstrBot HTTP Platform 是一个为 AstrBot 提供 **HTTP / HTTPS 接入能力** 
 3. 搜索 `HTTP Platform`
 4. 点击安装
 
----
-
 ### 方法二：手动安装
 
 ```bash
@@ -51,8 +35,6 @@ git clone https://github.com/Li-shi-ling/astrbot_plugin_httpplatform.git
 ```
 
 将插件放入 AstrBot 插件目录后，重启 AstrBot 即可。
-
----
 
 ## 配置说明
 
@@ -64,8 +46,6 @@ git clone https://github.com/Li-shi-ling/astrbot_plugin_httpplatform.git
 | `enable_http_api` | 布尔 | `true` | 是否启用 HTTP API |
 | `auth_token` | 字符串 | `""` | Bearer Token，为空表示不启用鉴权 |
 | `cors_origins` | 字符串 | `*` | 允许的跨域来源，多个来源可用逗号分隔 |
-
----
 
 ## API 文档
 
@@ -95,8 +75,6 @@ Authorization: Bearer <auth_token>
 application/json
 ```
 
----
-
 ## 1. 健康检查
 
 ### GET `/health`
@@ -114,8 +92,6 @@ application/json
   "version": "1.0.0"
 }
 ```
-
----
 
 ## 2. 发送消息（标准 HTTP）
 
@@ -143,8 +119,6 @@ application/json
 | `timeout` | 整数 | 请求超时时间，单位秒 |
 | `username` | 字符串 | 用户名，未传时会回退到 `nickname` |
 
----
-
 ### 标准返回示例
 
 ```json
@@ -169,8 +143,6 @@ application/json
 
 > `response` 返回的是 AstrBot 组件数组，而不是单纯字符串。
 
----
-
 ## 3. 流式发送消息（SSE）
 
 ### POST `/message/stream`
@@ -183,8 +155,6 @@ application/json
 Content-Type: text/event-stream
 ```
 
----
-
 ### SSE 请求体示例
 
 ```json
@@ -196,8 +166,6 @@ Content-Type: text/event-stream
   "heartbeat_interval": 5
 }
 ```
-
----
 
 ### SSE 返回示例
 
@@ -215,8 +183,6 @@ event: end
 data: {"type":"end","data":{}}
 ```
 
----
-
 ### 事件说明
 
 | 事件类型 | 说明 |
@@ -226,8 +192,6 @@ data: {"type":"end","data":{}}
 | `end` | 正常结束 |
 | `timeout` | 流式请求超时结束 |
 | `error` | 流式处理过程中发生错误 |
-
----
 
 ## 4. 消息输入格式
 
@@ -256,8 +220,6 @@ data: {"type":"end","data":{}}
 }
 ```
 
----
-
 ### 4.3 混合组件数组
 
 ```json
@@ -278,8 +240,6 @@ data: {"type":"end","data":{}}
   ]
 }
 ```
-
----
 
 ### 4.4 简写对象格式
 
@@ -334,8 +294,6 @@ data: {"type":"end","data":{}}
 }
 ```
 
----
-
 ### 4.5 OpenAI 风格内容片段
 
 #### 单条消息对象
@@ -376,8 +334,6 @@ data: {"type":"end","data":{}}
 }
 ```
 
----
-
 ## 5. 常见组件类型
 
 当前常用输入组件类型包括：
@@ -397,8 +353,6 @@ data: {"type":"end","data":{}}
 * `json`
 * `node`
 * `nodes`
-
----
 
 ## 6. 请求头额外数据说明
 
@@ -423,8 +377,6 @@ data: {"type":"end","data":{}}
 * `event.get_extra("data")`（原始 JSON 请求体）
 
 也就是说，请求头不会参与消息组件解析本身，但会作为事件上下文的一部分完整保留下来，供插件自行读取。
-
----
 
 ### 如何添加额外数据
 
@@ -461,8 +413,6 @@ resp = requests.post(
 
 print(resp.json())
 ```
-
----
 
 ### 如何在插件中获取额外数据
 
@@ -502,8 +452,6 @@ async def handle_http_extra_data(event: AstrMessageEvent):
     print("payload:", payload)
 ```
 
----
-
 ### 使用建议
 
 * 业务标识类信息，建议放在自定义 Header 中，例如 `X-Trace-Id`、`X-Tenant-Id`、`X-User-Role`
@@ -520,8 +468,6 @@ async def handle_http_extra_data(event: AstrMessageEvent):
 
 如果你从浏览器前端跨域发送额外自定义 Header，而该 Header 不在允许列表中，就可能被浏览器拦截预检请求；脚本调用或服务端对服务端调用通常不会受这个限制。
 
----
-
 ## 使用示例
 
 ### cURL
@@ -531,8 +477,6 @@ curl -X POST "http://127.0.0.1:8080/api/v1/message" \
   -H "Content-Type: application/json" \
   -d "{\"message\":\"hello\",\"platform\":\"http_test\",\"user_id\":\"123456\",\"nickname\":\"tester\"}"
 ```
-
----
 
 ### Python
 
@@ -554,8 +498,6 @@ payload = {
 resp = requests.post(f"{BASE_URL}/message", json=payload, timeout=60)
 print(resp.json())
 ```
-
----
 
 ### JavaScript
 
@@ -584,16 +526,12 @@ const resp = await fetch("http://127.0.0.1:8080/api/v1/message", {
 console.log(await resp.json());
 ```
 
----
-
 ## 安全建议
 
 * 生产环境建议配置 `auth_token`
 * 对公网开放时建议使用 HTTPS
 * 不建议暴露未鉴权的接口到公网
 * 如需浏览器访问，请按需配置 `cors_origins`
-
----
 
 ## 常见问题
 
@@ -602,32 +540,22 @@ console.log(await resp.json());
 * `/message`：等待完整结果后一次性返回
 * `/message/stream`：以 SSE 分片方式持续返回
 
----
-
 ### Q：为什么 `response` 是数组？
 
 因为 AstrBot 返回的是消息组件结构，而不是单一文本字段。
-
----
 
 ### Q：媒体消息一定要用 URL 吗？
 
 不一定。当前接口支持 `url`、`file`、部分简写字段，以及 OpenAI 风格内容片段格式。  
 在跨机器调用场景下，更推荐使用可访问的 URL 或可被服务端识别的安全格式。
 
----
-
 ## 贡献
 
 欢迎提交 Issue 和 PR。
 
----
-
 ## 许可证
 
 本项目采用 **GNU AFFERO GENERAL PUBLIC LICENSE v3**。
-
----
 
 ## 作者
 
@@ -641,4 +569,5 @@ console.log(await resp.json());
 
 为 AstrBot 提供灵活、易接入、适合二次开发的 HTTP 接口能力。
 
-  [https://github.com/Li-shi-ling/astrbot_plugin_httpplatform](https://github.com/Li-shi-ling/astrbot_plugin_httpplatform)
+[![Moe Counter](https://count.getloli.com/get/@li-shi-ling?theme=minecraft)](https://github.com/Li-shi-ling/astrbot_plugin_httpplatform)
+
