@@ -28,7 +28,6 @@ from astrbot.api.message_components import (
     Share,
     Unknown,
     Video,
-    WechatEmoji,
 )
 
 # 已有的 COMPONENT_TYPES 映射
@@ -57,7 +56,6 @@ COMPONENT_TYPES = {
     "nodes": Nodes,
     "json": Json,
     "unknown": Unknown,
-    "wechatemoji": WechatEmoji,
 }
 
 IMAGE_SUFFIXES = {
