@@ -214,3 +214,6 @@ test/
 CLAUDE.md
 .pipeline-workspace
 docs
+runtime/
+run_remote_http_test.bat
+simulator/
