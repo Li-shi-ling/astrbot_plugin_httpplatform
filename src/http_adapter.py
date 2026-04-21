@@ -149,6 +149,7 @@ def _get_http_adapter_registrar():
         **kwargs,
     )
 
+
 # ==================== HTTP 适配器主类 ====================
 @_get_http_adapter_registrar()
 class HTTPAdapter(Platform):
@@ -226,7 +227,7 @@ class HTTPAdapter(Platform):
             support_streaming_message=True,
             support_proactive_message=False,
         )
-        self._background_tasks: set[asyncio.Task] = set() # 用于追踪任务
+        self._background_tasks: set[asyncio.Task] = set()  # 用于追踪任务
         self.shutdown_event = asyncio.Event()
 
     def _start_task(self, coro: Coroutine) -> asyncio.Task:
@@ -397,7 +398,9 @@ class HTTPAdapter(Platform):
             url=request_obj.url,
             headers=dict(request_obj.headers),
             remote_addr=request_obj.remote_addr,
-            user_agent=request_obj.user_agent.string if request_obj.user_agent else None,
+            user_agent=request_obj.user_agent.string
+            if request_obj.user_agent
+            else None,
             content_type=request_obj.content_type,
             accept=request_obj.headers.get("Accept"),
         )
@@ -421,6 +424,8 @@ class HTTPAdapter(Platform):
         str,
     ]:
         data = await request_obj.get_json()
+        if not isinstance(data, dict):
+            raise ValueError(empty_body_error)
         if not data:
             raise ValueError(empty_body_error)
 
@@ -443,8 +448,15 @@ class HTTPAdapter(Platform):
         user_id = str(data.get("user_id", "0"))
         session_id = str(data.get("session_id") or f"{platform}_{user_id}")
         request_data = self._build_http_request_data(request_obj)
-        return data, request_data, messages, message_str, platform, user_id, session_id, str(
-            nickname
+        return (
+            data,
+            request_data,
+            messages,
+            message_str,
+            platform,
+            user_id,
+            session_id,
+            str(nickname),
         )
 
     def _build_astrbot_message(
@@ -471,7 +483,7 @@ class HTTPAdapter(Platform):
         return abm
 
     async def _handle_http_message(self, request_obj) -> Any:
-        """??? HTTP ??????"""
+        """处理 HTTP 同步消息请求。"""
         auth_result = await self._check_auth(request_obj)
         if auth_result is not None:
             return auth_result
@@ -534,10 +546,10 @@ class HTTPAdapter(Platform):
                 try:
                     timeout = int(timeout)
                 except Exception:
-                    logger.error("[HTTPAdapter] ?????int ???,??? 30")
+                    logger.error("[HTTPAdapter] timeout 不是有效的整数，使用默认值 30")
                     timeout = 30
             if timeout < 0:
-                logger.error(f"[HTTPAdapter] timeout:{timeout} < 0 ??? 30")
+                logger.error(f"[HTTPAdapter] timeout={timeout} 小于 0，使用默认值 30")
                 timeout = 30
 
             response = await asyncio.wait_for(future, timeout=timeout)
@@ -556,30 +568,30 @@ class HTTPAdapter(Platform):
             if event_id in self.pending_responses:
                 self.pending_responses.pop(event_id, None)
             return jsonify(
-                {"error": "??????", "event_id": event_id}
+                {"error": "请求处理超时", "event_id": event_id}
             ), HTTP_STATUS_CODE["TIMEOUT"]
         except ValueError as e:
             self.total_errors += 1
             return jsonify({"error": str(e)}), HTTP_STATUS_CODE["BAD_REQUEST"]
         except json.JSONDecodeError:
             self.total_errors += 1
-            return jsonify({"error": "?????JSON ???"}), HTTP_STATUS_CODE["BAD_REQUEST"]
+            return jsonify({"error": "请求体不是合法的 JSON"}), HTTP_STATUS_CODE[
+                "BAD_REQUEST"
+            ]
         except Exception as e:
             self.total_errors += 1
             if future and not future.done():
                 future.set_exception(e)
-            logger.error(
-                f"[HTTPAdapter] ???HTTP???????? {e}", exc_info=True
-            )
+            logger.error(f"[HTTPAdapter] 处理 HTTP 消息时发生异常: {e}", exc_info=True)
             return jsonify(
-                {"error": f"??????????? {str(e)}"}
+                {"error": f"处理请求时发生内部异常: {str(e)}"}
             ), HTTP_STATUS_CODE["INTERNAL_ERROR"]
         finally:
             if event_id is not None:
                 self.pending_responses.pop(event_id, None)
 
     async def _handle_http_stream_message(self, request_obj) -> Any:
-        """??? HTTP ????????? - ???????????????"""
+        """处理 HTTP 流式消息请求，使用 SSE 返回增量事件。"""
         auth_result = await self._check_auth(request_obj)
         if auth_result is not None:
             return auth_result
@@ -596,15 +608,15 @@ class HTTPAdapter(Platform):
                 username,
             ) = await self._extract_request_message_context(
                 request_obj,
-                empty_body_error="???????????",
-                missing_message_error="message ??????????",
-                default_nickname="??????",
+                empty_body_error="请求体不能为空",
+                missing_message_error="message 参数不能为空",
+                default_nickname="外部用户",
                 nickname_keys=("username", "nickname"),
             )
 
             async def generate():
                 event_id = str(uuid.uuid4())
-                queue: asyncio.Queue = asyncio.Queue(maxsize=100)  # ?????????
+                queue: asyncio.Queue = asyncio.Queue(maxsize=100)  # SSE 事件缓冲队列
 
                 abm = self._build_astrbot_message(
                     data=data,
@@ -638,16 +650,22 @@ class HTTPAdapter(Platform):
                     f"data: {json.dumps({'event_id': event_id, 'session_id': session_id}, ensure_ascii=False)}\n\n"
                 )
 
-                timeout = data.get("timeout", 600)  # ?????0????????????
+                timeout = data.get("timeout", 600)  # 默认 10 分钟，避免流长期无上限占用
                 if not isinstance(timeout, int):
-                    logger.error(f"[HTTPAdapter] ?????? timeout:{timeout} ????????int")
+                    logger.error(
+                        f"[HTTPAdapter] 流式请求的 timeout={timeout} 不是有效的整数"
+                    )
                     try:
                         timeout = int(timeout)
                     except Exception:
-                        logger.error("[HTTPAdapter] ?????int ???,??? 600")
+                        logger.error(
+                            "[HTTPAdapter] timeout 不是有效的整数，使用默认值 600"
+                        )
                         timeout = 600
                 if timeout < 0:
-                    logger.error(f"[HTTPAdapter] timeout:{timeout} < 0 ??? 600")
+                    logger.error(
+                        f"[HTTPAdapter] timeout={timeout} 小于 0，使用默认值 600"
+                    )
                     timeout = 600
 
                 heartbeat_interval = data.get("heartbeat_interval", 10)
@@ -703,24 +721,31 @@ class HTTPAdapter(Platform):
                         except asyncio.TimeoutError:
                             continue
                 except asyncio.CancelledError:
-                    logger.info(f"[HTTPAdapter] SSE???????? {event_id}")
+                    logger.info(f"[HTTPAdapter] SSE 连接被取消: {event_id}")
                 except Exception as e:
-                    logger.error(f"[HTTPAdapter] ???SSE????? {e}", exc_info=True)
+                    logger.error(
+                        f"[HTTPAdapter] 处理 SSE 事件流时发生异常: {e}", exc_info=True
+                    )
                 finally:
                     try:
                         queue.put_nowait(None)
                     except Exception as e:
-                        logger.error(f"[HTTPAdapter] SSE??????????????: {e}", exc_info=True)
+                        logger.error(
+                            f"[HTTPAdapter] SSE 结束时写入终止事件失败: {e}",
+                            exc_info=True,
+                        )
                     if hasattr(event, "_is_streaming"):
                         event._is_streaming = False
-                    logger.info(f"[HTTPAdapter] SSE??????: {event_id}, ???: {session_id}")
+                    logger.info(
+                        f"[HTTPAdapter] SSE 请求结束: {event_id}, 会话: {session_id}"
+                    )
 
             response_headers = {
                 "Content-Type": "text/event-stream",
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",  # ???Nginx???
-                "X-Accel-Timeout": "1200",  # Nginx?????????
+                "X-Accel-Buffering": "no",  # 禁用 Nginx 缓冲
+                "X-Accel-Timeout": "1200",  # 为反向代理预留更长超时时间
             }
             return generate(), HTTP_STATUS_CODE["OK"], response_headers
 
@@ -729,11 +754,15 @@ class HTTPAdapter(Platform):
             return jsonify({"error": str(e)}), HTTP_STATUS_CODE["BAD_REQUEST"]
         except json.JSONDecodeError:
             self.total_errors += 1
-            return jsonify({"error": "?????JSON ???"}), HTTP_STATUS_CODE["BAD_REQUEST"]
+            return jsonify({"error": "请求体不是合法的 JSON"}), HTTP_STATUS_CODE[
+                "BAD_REQUEST"
+            ]
         except Exception as e:
             self.total_errors += 1
-            logger.error(f"[HTTPAdapter] ?????????????? {e}", exc_info=True)
-            return jsonify({"error": f"??????????? {str(e)}"}), HTTP_STATUS_CODE["INTERNAL_ERROR"]
+            logger.error(f"[HTTPAdapter] 初始化流式消息处理失败: {e}", exc_info=True)
+            return jsonify(
+                {"error": f"处理请求时发生内部异常: {str(e)}"}
+            ), HTTP_STATUS_CODE["INTERNAL_ERROR"]
 
     async def _check_auth(self, request_obj) -> Any | None:
         """检查鉴权"""
@@ -771,7 +800,9 @@ class HTTPAdapter(Platform):
             logger.info("[HTTPAdapter] HTTP API 已禁用")
             return
 
-        logger.info(f"[HTTPAdapter] 启动 HTTP 服务器在 {self.http_host}:{self.http_port}")
+        logger.info(
+            f"[HTTPAdapter] 启动 HTTP 服务器在 {self.http_host}:{self.http_port}"
+        )
         logger.info(f"[HTTPAdapter] API 前缀: {self.api_prefix}")
         logger.info(f"[HTTPAdapter] 鉴权: {'启用' if self.auth_token else '禁用'}")
         logger.info(f"[HTTPAdapter] CORS 来源: {self.cors_origins}")

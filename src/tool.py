@@ -212,7 +212,8 @@ def normalize_message_payload(message: Any) -> list[Any]:
             image_url = message.get("url", "")
         return [{"type": "image", "data": {"url": image_url}}]
     if msg_type in {"audio", "input_audio", "voice"}:
-        return [{"type": "record", "data": {"url": message.get("url", "")}}]
+        audio_url = message.get("audio_url", "") or message.get("url", "")
+        return [{"type": "record", "data": {"url": audio_url}}]
     if msg_type in {"mention", "mention_user"}:
         return [
             {
